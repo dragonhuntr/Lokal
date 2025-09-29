@@ -1,4 +1,4 @@
-# sweng465-restful-service-design
+# Lokal
 
 To install dependencies:
 

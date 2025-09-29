@@ -1,6 +1,10 @@
 {
-  "name": "sweng465-restful-service-design",
+  "name": "lokal",
   "module": "index.js",
   "type": "module",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "express": "^5.1.0",
+    "zod": "^4.1.11"
+  }
 }
