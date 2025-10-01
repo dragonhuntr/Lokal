@@ -9,10 +9,12 @@ let alerts = [];
 // User
 app.get("/api/user/:id", (req, res) => {
 	const user = users.find((u) => u.id === req.params.id);
+	
 	if (!user) {
 	  res.status(404).json({ error: "User not found" });
 	  return;
 	}
+
 	res.json(user);
   });
   
