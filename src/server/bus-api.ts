@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { z } from "zod";
 
 export interface RouteCoordinate {
   longitude: number;
@@ -135,7 +135,7 @@ export interface RouteDirection {
 
 export interface StopDepartureInfo {
   LastUpdated: string;
-  StopId: number;  // Adding this back as it's needed for filtering
+  StopId: number;
   RouteDirections: RouteDirection[];
 }
 
@@ -149,7 +149,7 @@ export interface Stop {
   StopRecordId: number;
 }
 
-// Function to fetch and parse KML route data
+// fetch and parse KML route data
 export const fetchRouteKML = async (routeId: number): Promise<RouteData> => {
   try {
     const response = await fetch(
@@ -164,54 +164,50 @@ export const fetchRouteKML = async (routeId: number): Promise<RouteData> => {
     return parseKmlToRouteData(kmlText);
   } catch (error) {
     console.error("Error fetching route data:", error);
-    toast.error("Could not retrieve route data");
     return { name: "Error", paths: [] };
   }
 };
 
-// Function to parse KML text to RouteData
+// parse KML text to RouteData
 export const parseKmlToRouteData = (kmlText: string): RouteData => {
   try {
-    const parser = new DOMParser();
-    const kmlDoc = parser.parseFromString(kmlText, "text/xml");
+    // Document name
+    const nameMatch = /<Document>\s*<name>([^<]*)<\/name>/i.exec(kmlText);
+    const docName = nameMatch?.[1] ?? "Unknown Route";
 
-    // Get document name
-    const docNameElement = kmlDoc.querySelector("Document > name");
-    const docName = docNameElement ? docNameElement.textContent || "Unknown Route" : "Unknown Route";
-
-    // Get all placemarks (line segments)
-    const placemarks = kmlDoc.querySelectorAll("Placemark");
+    // Extract each Placemark
+    const placemarkRegex = /<Placemark[\s\S]*?<\/Placemark>/gi;
     const paths: RoutePath[] = [];
+    const placemarks: string[] = [];
+    {
+      let m: RegExpExecArray | null;
+      while ((m = placemarkRegex.exec(kmlText)) !== null) {
+        placemarks.push(m[0]);
+      }
+    }
 
-    placemarks.forEach((placemark) => {
-      const nameElement = placemark.querySelector("name");
-      const name = nameElement ? nameElement.textContent || "Unknown Path" : "Unknown Path";
+    for (const placemark of placemarks) {
+      const nameMatchInner = /<name>([^<]*)<\/name>/i.exec(placemark);
+      const name = nameMatchInner?.[1] ?? "Unknown Path";
+      const coordsMatch = /<coordinates>([\s\S]*?)<\/coordinates>/i.exec(placemark);
+      const coordsText = coordsMatch?.[1]?.trim() ?? "";
+      if (!coordsText) continue;
 
-      const coordinatesElement = placemark.querySelector("LineString > coordinates");
-      if (!coordinatesElement?.textContent) return;
-
-      const coordinatesText = coordinatesElement.textContent.trim();
-      const coordinates: RouteCoordinate[] = coordinatesText
-        .split(" ")
-        .filter(coord => coord.trim().length > 0)
-        .map(coordString => {
-          const parts = coordString.split(",").map(Number);
-          const longitude = parts[0] ?? 0;
-          const latitude = parts[1] ?? 0;
-          const altitude = parts[2] ?? 0;
+      const coordinates: RouteCoordinate[] = coordsText
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((coord) => {
+          const [lngStr, latStr, altStr] = coord.split(",");
+          const longitude = Number(lngStr ?? 0);
+          const latitude = Number(latStr ?? 0);
+          const altitude = Number(altStr ?? 0);
           return { longitude, latitude, altitude };
         });
 
-      paths.push({
-        name,
-        coordinates
-      });
-    });
+      paths.push({ name, coordinates });
+    }
 
-    return {
-      name: docName,
-      paths
-    };
+    return { name: docName, paths };
   } catch (error) {
     console.error("Error parsing KML data:", error);
     return { name: "Error", paths: [] };
@@ -221,42 +217,119 @@ export const parseKmlToRouteData = (kmlText: string): RouteData => {
 export const fetchRoutes = async (): Promise<Route[]> => {
   try {
     const response = await fetch(
-      'https://emta.availtec.com/InfoPoint/rest/Routes/GetVisibleRoutes'
+      'https://emta.availtec.com/InfoPoint/rest/Routes/GetVisibleRoutes',
+      { headers: { Accept: 'application/json' }, cache: 'no-store' }
     );
 
     if (!response.ok) {
       throw new Error(`API request failed with status ${response.status}`);
     }
 
-    return await response.json() as Route[];
+    const RawRouteSchema = z.object({
+      RouteId: z.coerce.number(),
+      ShortName: z.coerce.string(),
+      LongName: z.coerce.string().optional().default(""),
+      Description: z.union([z.string(), z.null()]).optional(),
+      Color: z.coerce.string().optional().default(""),
+      TextColor: z.coerce.string().optional().default(""),
+      IsVisible: z.preprocess((v) => {
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'number') return v !== 0;
+        if (typeof v === 'string') return v.toLowerCase() === 'true' || v === '1';
+        return false;
+      }, z.boolean()).optional().default(true),
+    }).passthrough();
+
+    const json: unknown = await response.json();
+    const parsed = z.array(RawRouteSchema).parse(json);
+
+    const toHex = (str: string) => {
+      const s = str.trim();
+      return s.startsWith('#') ? s.slice(1) : s;
+    };
+
+    const routes: Route[] = parsed.map((r) => ({
+      RouteId: r.RouteId,
+      ShortName: r.ShortName,
+      LongName: r.LongName ?? "",
+      Description: typeof r.Description === 'string' ? r.Description : "",
+      Color: toHex(r.Color ?? ""),
+      TextColor: toHex(r.TextColor ?? ""),
+      IsVisible: r.IsVisible ?? true,
+    }));
+
+    return routes;
   } catch (error) {
     console.error("Error fetching routes:", error);
-    toast.error("Could not retrieve routes");
     return [];
   }
 };
 
-// Cache for route details
+// cache for route details
 let routeDetailsCache: Record<number, RouteDetails> = {};
 let lastRouteDetailsFetchTime = 0;
-const ROUTE_DETAILS_CACHE_LIFETIME = 30000; // 30 seconds since vehicle positions update frequently
+const ROUTE_DETAILS_CACHE_LIFETIME = 30000; //can decrease this
 
 export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> => {
-  // If cache is fresh and we have this route, use it
+  // if cache is fresh and we have this route, use it
   if (Date.now() - lastRouteDetailsFetchTime < ROUTE_DETAILS_CACHE_LIFETIME &&
       routeDetailsCache[routeId]) {
     return routeDetailsCache[routeId];
   }
 
   try {
-    // Try to fetch all route details first
+    // try to fetch all route details first
     const response = await fetch(
       'https://emta.availtec.com/InfoPoint/rest/RouteDetails/GetAllRouteDetails'
     );
 
     if (response.ok) {
-      // If getAllRouteDetails works, cache all routes
-      const allRoutes = await response.json() as RouteDetails[];
+      // if getAllRouteDetails works, cache all routes
+      const VehicleSchema = z.object({
+        BlockFareboxId: z.number(),
+        Destination: z.string(),
+        Direction: z.string(),
+        DirectionLong: z.string(),
+        DisplayStatus: z.string(),
+        Heading: z.number(),
+        LastStop: z.string(),
+        LastUpdated: z.string(),
+        Latitude: z.number(),
+        Longitude: z.number(),
+        Name: z.string(),
+        OccupancyStatusReportLabel: z.string(),
+        RouteId: z.number(),
+        Speed: z.number(),
+        VehicleId: z.number(),
+      });
+      const StopSchema = z.object({
+        Description: z.string(),
+        IsTimePoint: z.boolean(),
+        Latitude: z.number(),
+        Longitude: z.number(),
+        Name: z.string(),
+        StopId: z.number(),
+        StopRecordId: z.number(),
+      });
+      const DirectionSchema = z.object({
+        Dir: z.string(),
+        DirectionDesc: z.string().nullable(),
+        DirectionIconFileName: z.string().nullable(),
+      });
+      const RouteDetailsSchema = z.object({
+        Color: z.string(),
+        Directions: z.array(DirectionSchema),
+        GoogleDescription: z.string(),
+        LongName: z.string(),
+        RouteAbbreviation: z.string(),
+        RouteId: z.number(),
+        ShortName: z.string(),
+        RouteTraceFilename: z.string(),
+        Stops: z.array(StopSchema),
+        Vehicles: z.array(VehicleSchema),
+      });
+      const json: unknown = await response.json();
+      const allRoutes = z.array(RouteDetailsSchema).parse(json);
       routeDetailsCache = allRoutes.reduce((acc: Record<number, RouteDetails>, route: RouteDetails) => {
         acc[route.RouteId] = route;
         return acc;
@@ -269,7 +342,7 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
 
       return routeDetailsCache[routeId];
     } else {
-      // Fall back to single route fetch if getAllRouteDetails fails
+      // fall back to single route fetch if getAllRouteDetails fails
       const singleResponse = await fetch(
         `https://emta.availtec.com/InfoPoint/rest/RouteDetails/Get/${routeId}`
       );
@@ -278,7 +351,51 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
         throw new Error(`API request failed with status ${singleResponse.status}`);
       }
 
-      const routeDetails = await singleResponse.json() as RouteDetails;
+      const json: unknown = await singleResponse.json();
+      const VehicleSchema = z.object({
+        BlockFareboxId: z.number(),
+        Destination: z.string(),
+        Direction: z.string(),
+        DirectionLong: z.string(),
+        DisplayStatus: z.string(),
+        Heading: z.number(),
+        LastStop: z.string(),
+        LastUpdated: z.string(),
+        Latitude: z.number(),
+        Longitude: z.number(),
+        Name: z.string(),
+        OccupancyStatusReportLabel: z.string(),
+        RouteId: z.number(),
+        Speed: z.number(),
+        VehicleId: z.number(),
+      });
+      const StopSchema = z.object({
+        Description: z.string(),
+        IsTimePoint: z.boolean(),
+        Latitude: z.number(),
+        Longitude: z.number(),
+        Name: z.string(),
+        StopId: z.number(),
+        StopRecordId: z.number(),
+      });
+      const DirectionSchema = z.object({
+        Dir: z.string(),
+        DirectionDesc: z.string().nullable(),
+        DirectionIconFileName: z.string().nullable(),
+      });
+      const RouteDetailsSchema = z.object({
+        Color: z.string(),
+        Directions: z.array(DirectionSchema),
+        GoogleDescription: z.string(),
+        LongName: z.string(),
+        RouteAbbreviation: z.string(),
+        RouteId: z.number(),
+        ShortName: z.string(),
+        RouteTraceFilename: z.string(),
+        Stops: z.array(StopSchema),
+        Vehicles: z.array(VehicleSchema),
+      });
+      const routeDetails = RouteDetailsSchema.parse(json);
       routeDetailsCache[routeId] = routeDetails;
       lastRouteDetailsFetchTime = Date.now();
 
@@ -286,7 +403,7 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
     }
   } catch (error) {
     console.error("Error fetching route details:", error);
-    // If error occurs, return cached data if available
+    // if error occurs, return cached data if available
     if (routeDetailsCache[routeId]) {
       return routeDetailsCache[routeId];
     }
@@ -294,16 +411,16 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
   }
 };
 
-// Cache for stop departures
+// cache for stop departures
 let departuresCache: StopDepartureInfo[] = [];
 let lastFetchTime = 0;
-const CACHE_LIFETIME = 30000; // 30 seconds
+const CACHE_LIFETIME = 30000; //can decrease this
 
 // Start polling for departures
 let pollingInterval: NodeJS.Timeout | null = null;
 
 const startPolling = () => {
-  if (pollingInterval) return; // Already polling
+  if (pollingInterval) return; // already polling
 
   const pollDepartures = async () => {
     try {
@@ -315,17 +432,85 @@ const startPolling = () => {
         throw new Error(`API request failed with status ${response.status}`);
       }
 
-      departuresCache = await response.json() as StopDepartureInfo[];
+      const TripSchema = z.object({
+        BlockFareboxId: z.number(),
+        GtfsTripId: z.string(),
+        InternalSignDesc: z.string(),
+        InternetServiceDesc: z.string(),
+        IVRServiceDesc: z.string(),
+        StopSequence: z.number(),
+        TripDirection: z.string(),
+        TripId: z.number(),
+        TripRecordId: z.number(),
+        TripStartTime: z.string(),
+        TripStartTimeLocalTime: z.string(),
+        TripStatus: z.number(),
+        TripStatusReportLabel: z.string(),
+      });
+      const StopDepartureSchema = z.object({
+        ADT: z.string().nullable(),
+        ADTLocalTime: z.string().nullable(),
+        ATA: z.string().nullable(),
+        ATALocalTime: z.string().nullable(),
+        Bay: z.string().nullable(),
+        Dev: z.string(),
+        EDT: z.string(),
+        EDTLocalTime: z.string(),
+        ETA: z.string(),
+        ETALocalTime: z.string(),
+        IsCompleted: z.boolean(),
+        IsLastStopOnTrip: z.boolean(),
+        LastUpdated: z.string(),
+        LastUpdatedLocalTime: z.string(),
+        Mode: z.number(),
+        ModeReportLabel: z.string(),
+        PropogationStatus: z.number(),
+        SDT: z.string(),
+        SDTLocalTime: z.string(),
+        STA: z.string(),
+        STALocalTime: z.string(),
+        StopFlag: z.number(),
+        StopStatus: z.number(),
+        StopStatusReportLabel: z.string(),
+        Trip: TripSchema,
+        PropertyName: z.string(),
+      });
+      const HeadwayDepartureSchema = z.object({
+        HeadwayIntervalScheduled: z.string(),
+        HeadwayIntervalTarget: z.string(),
+        LastDeparture: z.string(),
+        LastUpdated: z.string(),
+        NextDeparture: z.string(),
+        VehicleId: z.string(),
+      });
+      const RouteDirectionSchema = z.object({
+        Direction: z.string(),
+        DirectionCode: z.string(),
+        RouteId: z.string(),
+        RouteRecordId: z.number(),
+        Departures: z.array(StopDepartureSchema),
+        HeadwayDepartures: z.array(HeadwayDepartureSchema).nullable(),
+        IsDone: z.boolean(),
+        IsHeadway: z.boolean(),
+        IsHeadwayMonitored: z.boolean(),
+      });
+      const StopDepartureInfoSchema = z.object({
+        LastUpdated: z.string(),
+        StopId: z.number(),
+        RouteDirections: z.array(RouteDirectionSchema),
+      });
+      const json: unknown = await response.json();
+      departuresCache = z.array(StopDepartureInfoSchema).parse(json);
       lastFetchTime = Date.now();
     } catch (error) {
       console.error("Error fetching stop departures:", error);
     }
   };
 
-  // Initial fetch
+  // initial fetch
   void pollDepartures();
 
-  // Set up polling interval
+  // set up polling interval
   pollingInterval = setInterval(() => void pollDepartures(), CACHE_LIFETIME);
 };
 
@@ -337,11 +522,11 @@ const stopPolling = () => {
 };
 
 export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartureInfo[]> => {
-  // Start polling if not already started
+  // start polling if not already started
   startPolling();
 
   try {
-    // Always use cached data if available, even if slightly stale
+    // always use cached data if available, even if slightly stale
     if (departuresCache.length > 0) {
       if (stopId) {
         return departuresCache.filter((departure) => departure.StopId === stopId);
@@ -349,7 +534,7 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
       return departuresCache;
     }
 
-    // Only fetch directly if no cache exists and polling hasn't populated it yet
+    // only fetch directly if no cache exists and polling hasn't populated it yet
     // This should rarely happen since startPolling() does an immediate fetch
     if (Date.now() - lastFetchTime > CACHE_LIFETIME * 2) {
       const response = await fetch(
@@ -360,7 +545,75 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
         throw new Error(`API request failed with status ${response.status}`);
       }
 
-      departuresCache = await response.json() as StopDepartureInfo[];
+      const TripSchema = z.object({
+        BlockFareboxId: z.number(),
+        GtfsTripId: z.string(),
+        InternalSignDesc: z.string(),
+        InternetServiceDesc: z.string(),
+        IVRServiceDesc: z.string(),
+        StopSequence: z.number(),
+        TripDirection: z.string(),
+        TripId: z.number(),
+        TripRecordId: z.number(),
+        TripStartTime: z.string(),
+        TripStartTimeLocalTime: z.string(),
+        TripStatus: z.number(),
+        TripStatusReportLabel: z.string(),
+      });
+      const StopDepartureSchema = z.object({
+        ADT: z.string().nullable(),
+        ADTLocalTime: z.string().nullable(),
+        ATA: z.string().nullable(),
+        ATALocalTime: z.string().nullable(),
+        Bay: z.string().nullable(),
+        Dev: z.string(),
+        EDT: z.string(),
+        EDTLocalTime: z.string(),
+        ETA: z.string(),
+        ETALocalTime: z.string(),
+        IsCompleted: z.boolean(),
+        IsLastStopOnTrip: z.boolean(),
+        LastUpdated: z.string(),
+        LastUpdatedLocalTime: z.string(),
+        Mode: z.number(),
+        ModeReportLabel: z.string(),
+        PropogationStatus: z.number(),
+        SDT: z.string(),
+        SDTLocalTime: z.string(),
+        STA: z.string(),
+        STALocalTime: z.string(),
+        StopFlag: z.number(),
+        StopStatus: z.number(),
+        StopStatusReportLabel: z.string(),
+        Trip: TripSchema,
+        PropertyName: z.string(),
+      });
+      const HeadwayDepartureSchema = z.object({
+        HeadwayIntervalScheduled: z.string(),
+        HeadwayIntervalTarget: z.string(),
+        LastDeparture: z.string(),
+        LastUpdated: z.string(),
+        NextDeparture: z.string(),
+        VehicleId: z.string(),
+      });
+      const RouteDirectionSchema = z.object({
+        Direction: z.string(),
+        DirectionCode: z.string(),
+        RouteId: z.string(),
+        RouteRecordId: z.number(),
+        Departures: z.array(StopDepartureSchema),
+        HeadwayDepartures: z.array(HeadwayDepartureSchema).nullable(),
+        IsDone: z.boolean(),
+        IsHeadway: z.boolean(),
+        IsHeadwayMonitored: z.boolean(),
+      });
+      const StopDepartureInfoSchema = z.object({
+        LastUpdated: z.string(),
+        StopId: z.number(),
+        RouteDirections: z.array(RouteDirectionSchema),
+      });
+      const json: unknown = await response.json();
+      departuresCache = z.array(StopDepartureInfoSchema).parse(json);
       lastFetchTime = Date.now();
     }
 
@@ -371,7 +624,7 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
     return departuresCache;
   } catch (error) {
     console.error("Error fetching stop departures:", error);
-    // If error occurs, return cached data if available, otherwise empty array
+    // if error occurs, return cached data if available, otherwise empty array
     if (departuresCache.length > 0) {
       if (stopId) {
         return departuresCache.filter((departure) => departure.StopId === stopId);
@@ -382,13 +635,13 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
   }
 };
 
-// Cache for all stops
+// cache for all stops
 let stopsCache: Stop[] = [];
 let lastStopsFetchTime = 0;
-const STOPS_CACHE_LIFETIME = 5 * 60 * 1000; // 5 minutes, stops don't change often
+const STOPS_CACHE_LIFETIME = 5 * 60 * 1000; //can decrease this
 
 export const fetchAllStops = async (): Promise<Stop[]> => {
-  // If cache is fresh, use it
+  // if cache is fresh, use it
   if (Date.now() - lastStopsFetchTime < STOPS_CACHE_LIFETIME && stopsCache.length > 0) {
     return stopsCache;
   }
@@ -401,13 +654,22 @@ export const fetchAllStops = async (): Promise<Stop[]> => {
     if (!response.ok) {
       throw new Error(`API request failed with status ${response.status}`);
     }
-
-    stopsCache = await response.json() as Stop[];
+    const StopSchema = z.object({
+      Description: z.string(),
+      IsTimePoint: z.boolean(),
+      Latitude: z.number(),
+      Longitude: z.number(),
+      Name: z.string(),
+      StopId: z.number(),
+      StopRecordId: z.number(),
+    });
+    const json: unknown = await response.json();
+    stopsCache = z.array(StopSchema).parse(json);
     lastStopsFetchTime = Date.now();
     return stopsCache;
   } catch (error) {
     console.error("Error fetching all stops:", error);
-    // If error occurs, return cached data if available, otherwise empty array
+    // if error occurs, return cached data if available, otherwise empty array
     if (stopsCache.length > 0) {
       return stopsCache;
     }
@@ -415,12 +677,12 @@ export const fetchAllStops = async (): Promise<Stop[]> => {
   }
 };
 
-// Clean up function to stop polling
+// clean up function to stop polling
 export const cleanup = () => {
   stopPolling();
 };
 
-// Function to format ETA
+// function to format ETA
 export const formatETA = (etaLocalTime: string): string => {
   try {
     const etaDate = new Date(etaLocalTime);
@@ -431,7 +693,7 @@ export const formatETA = (etaLocalTime: string): string => {
     if (diffMinutes === 1) return '1 min';
     if (diffMinutes < 60) return `${diffMinutes} mins`;
 
-    // For times more than an hour away, show the actual time
+    // for times more than an hour away, show the actual time
     return etaDate.toLocaleTimeString([], {
       hour: 'numeric',
       minute: '2-digit'

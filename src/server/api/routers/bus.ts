@@ -12,7 +12,11 @@ export const busRouter = createTRPCRouter({
   // Get all visible routes
   getRoutes: publicProcedure
     .query(async () => {
-      return await fetchRoutes();
+      const routes = await fetchRoutes();
+      if (!routes.length) {
+        console.error("bus.getRoutes returned 0 routes");
+      }
+      return routes;
     }),
 
   // Get detailed information for a specific route
