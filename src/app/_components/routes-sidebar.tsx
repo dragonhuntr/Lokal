@@ -3,9 +3,8 @@
 import { useMemo, useState } from "react";
 import { api } from "@/trpc/react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ScrollArea, Scrollbar } from "@radix-ui/react-scroll-area";
+import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { Menu, X, Search } from "lucide-react";
-// import { cn } from "@/lib/utils";
 
 export function RoutesSidebar() {
   const [open, setOpen] = useState(true);
@@ -36,7 +35,7 @@ export function RoutesSidebar() {
           </button>
         </Dialog.Trigger>
         <Dialog.Portal>
-          <Dialog.Content className="pointer-events-auto fixed inset-y-4 left-4 z-50 w-[320px] rounded-lg border bg-background p-3 shadow-xl">
+          <Dialog.Content className="pointer-events-auto fixed inset-y-4 left-4 z-50 w-[320px] rounded-lg border bg-background p-3 shadow-xl flex flex-col overflow-hidden box-border">
             <div className="mb-2 flex items-center justify-between">
               <Dialog.Title className="text-base font-semibold">Routes</Dialog.Title>
               <Dialog.Close asChild>
@@ -60,30 +59,49 @@ export function RoutesSidebar() {
               {isLoading ? "Loading routes..." : `${filtered.length} routes`}
             </div>
 
-            <div className="h-[60vh] overflow-hidden rounded-md border">
-              <ScrollArea type="auto" className="h-full w-full">
-                <ul className="divide-y">
-                  {filtered.map((route) => (
-                    <li key={route.RouteId} className="group">
-                      <button
-                        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/60"
-                        title={route.LongName}
-                      >
-                        <span
-                          className="inline-block h-3 w-3 rounded"
-                          style={{ backgroundColor: `#${route.Color}` }}
-                          aria-hidden
-                        />
-                        <span className="min-w-[2.5rem] text-xs font-semibold tabular-nums">
-                          {route.ShortName}
-                        </span>
-                        <span className="truncate text-sm">{route.LongName}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <Scrollbar orientation="vertical" />
-              </ScrollArea>
+            <div className="flex-1 min-h-0">
+              <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
+                <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
+                  <ul className="space-y-2 p-2 pr-3">
+                  {filtered.map((route) => {
+                    const color = `#${(route.Color ?? "").trim()}`;
+                    const subtitle = route.Description && route.Description.length > 0 ? route.Description : "";
+                    return (
+                      <li key={route.RouteId}>
+                        <button
+                          className="relative w-full max-w-full overflow-hidden rounded-2xl border bg-card px-4 py-4 text-left shadow-sm transition hover:shadow-md"
+                          title={route.LongName}
+                        >
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+                            <div className="min-w-0">
+                              <div className="text-sm text-muted-foreground truncate">
+                                {subtitle || route.LongName}
+                              </div>
+                              <div className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
+                                {route.LongName || route.ShortName}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">On Time</div>
+                            </div>
+                            <div className="text-right">
+                              <span
+                                className="block leading-none text-5xl font-extrabold tabular-nums tracking-tighter"
+                                style={{ color }}
+                              >
+                                {route.ShortName.includes("Route ") ? route.ShortName.split("Route ")[1] : route.ShortName}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                  </ul>
+                </ScrollArea.Viewport>
+                <ScrollArea.Scrollbar orientation="vertical">
+                  <ScrollArea.Thumb className="rounded-full bg-border/60" />
+                </ScrollArea.Scrollbar>
+                <ScrollArea.Corner />
+              </ScrollArea.Root>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -91,7 +109,5 @@ export function RoutesSidebar() {
     </div>
   );
 }
-
-// no-op placeholder removed
 
 
