@@ -1,0 +1,126 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trips         Trip[]
+  savedRoutes   SavedRoute[]
+  alerts        Alert[]
+  feedbacks     Feedback[]
+}
+
+model Route {
+  id          String   @id @default(cuid())
+  name        String
+  number      String
+  origin      String
+  destination String
+  totalStops  Int
+  duration    Int
+  createdAt   DateTime @default(now())
+
+  trips       Trip[]
+  stops       Stop[]
+  savedRoutes SavedRoute[]
+  feedbacks   Feedback[]
+}
+
+model Stop {
+  id         String     @id @default(cuid())
+  name       String
+  latitude   Float
+  longitude  Float
+  sequence   Int
+  routeId    String
+  route      Route      @relation(fields: [routeId], references: [id])
+  startTrips Trip[]     @relation("StartStop")
+  endTrips   Trip[]     @relation("EndStop")
+  feedbacks  Feedback[]
+}
+
+model Trip {
+  id            String     @id @default(cuid())
+  userId        String
+  routeId       String
+  startStopId   String?
+  endStopId     String?
+  isRecurring   Boolean    @default(false)
+  frequency     String?
+  departureTime DateTime
+  arrivalTime   DateTime?
+  status        TripStatus @default(PLANNED)
+  createdAt     DateTime   @default(now())
+
+  user      User    @relation(fields: [userId], references: [id])
+  route     Route   @relation(fields: [routeId], references: [id])
+  startStop Stop?   @relation("StartStop", fields: [startStopId], references: [id])
+  endStop   Stop?   @relation("EndStop", fields: [endStopId], references: [id])
+  alerts    Alert[]
+}
+
+enum TripStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+model Alert {
+  id      String    @id @default(cuid())
+  userId  String
+  tripId  String?
+  type    AlertType
+  message String
+  sendAt  DateTime
+  isSent  Boolean   @default(false)
+
+  user User  @relation(fields: [userId], references: [id])
+  trip Trip? @relation(fields: [tripId], references: [id])
+}
+
+enum AlertType {
+  DEPARTURE_REMINDER
+  TRANSFER_ALERT
+  ARRIVAL_ALERT
+  SERVICE_UPDATE
+}
+
+model SavedRoute {
+  id        String   @id @default(cuid())
+  userId    String
+  routeId   String
+  nickname  String?
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  route Route @relation(fields: [routeId], references: [id])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String
+  stopId    String?
+  routeId   String?
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user  User   @relation(fields: [userId], references: [id])
+  stop  Stop?  @relation(fields: [stopId], references: [id])
+  route Route? @relation(fields: [routeId], references: [id])
+}
