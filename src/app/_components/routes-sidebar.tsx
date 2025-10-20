@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { Menu, X, Search, MapPin, Bus } from "lucide-react";
+import { Menu, X, Search, MapPin, Bus, Footprints, BusFront, ArrowLeft } from "lucide-react";
 import { env } from "@/env";
 import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
+import type { PlanItinerary } from "@/server/routing/service";
 
-const RESULT_LIMIT = 10;
+const RESULT_LIMIT = 10; // RANGE IS 0 TO 10
 const DEBOUNCE_MS = 300;
 const EARTH_RADIUS_METERS = 6_371_000;
 
@@ -24,14 +25,23 @@ export interface LocationSearchResult {
   context: string[];
 }
 
-type SidebarView = "routes" | "places";
+type SidebarView = "routes" | "places" | "itineraries";
+
+type PlanStatus = "idle" | "loading" | "success" | "error";
 
 interface RoutesSidebarProps {
   selectedRouteId?: number;
   onSelectRoute?: (route: RouteSummary) => void;
   selectedLocationId?: string;
+  selectedLocation?: LocationSearchResult | null;
   onSelectLocation?: (location: LocationSearchResult) => void;
   userLocation?: { latitude: number; longitude: number } | null;
+  hasOrigin?: boolean;
+  itineraries?: PlanItinerary[] | null;
+  planStatus?: PlanStatus;
+  planError?: string | null;
+  selectedItineraryIndex?: number;
+  onSelectItinerary?: (index: number, itinerary: PlanItinerary) => void;
 }
 
 type ContextEntry =
@@ -96,12 +106,34 @@ function distanceBetweenMeters(origin: { latitude: number; longitude: number }, 
   return EARTH_RADIUS_METERS * c;
 }
 
+function formatMinutes(value: number) {
+  const rounded = Math.round(value);
+  if (rounded <= 0) return "<1 min";
+  return `${rounded} min${rounded === 1 ? "" : "s"}`;
+}
+
+function formatDistance(distanceMeters: number) {
+  if (distanceMeters < 1000) {
+    return `${Math.round(distanceMeters)} m`;
+  }
+  const kilometres = distanceMeters / 1000;
+  const decimals = kilometres >= 10 ? 0 : 1;
+  return `${kilometres.toFixed(decimals)} km`;
+}
+
 export function RoutesSidebar({
   selectedRouteId,
   onSelectRoute,
   selectedLocationId,
+  selectedLocation,
   onSelectLocation,
   userLocation,
+  hasOrigin = false,
+  itineraries,
+  planStatus = "idle",
+  planError = null,
+  selectedItineraryIndex = 0,
+  onSelectItinerary,
 }: RoutesSidebarProps) {
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<SidebarView>("routes");
@@ -112,8 +144,22 @@ export function RoutesSidebar({
   const [placesError, setPlacesError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
+  const previousLocationIdRef = useRef<string | null>(null);
 
   const { data: routes, isLoading: areRoutesLoading } = api.bus.getRoutes.useQuery();
+
+  useEffect(() => {
+    const previousId = previousLocationIdRef.current;
+    const currentId = selectedLocation?.id ?? null;
+
+    if (currentId && currentId !== previousId) {
+      setView("itineraries");
+    } else if (!currentId && previousId && view === "itineraries") {
+      setView("places");
+    }
+
+    previousLocationIdRef.current = currentId;
+  }, [selectedLocation, view]);
 
   const ensureSessionToken = useCallback(() => {
     if (sessionTokenRef.current) return sessionTokenRef.current;
@@ -320,12 +366,55 @@ export function RoutesSidebar({
     return `${placeResults.length} places`;
   }, [placeQuery, placesError, isPlacesLoading, placeResults.length]);
 
+  const itineraryStatusMessage = useMemo(() => {
+    switch (planStatus) {
+      case "loading":
+        return hasOrigin ? "Calculating routes…" : "Waiting for your location…";
+      case "error":
+        return planError ?? "We couldn’t calculate a route.";
+      case "success":
+        if (!itineraries?.length) {
+          return "No itineraries available. Try adjusting your search.";
+        }
+        return null;
+      default:
+        return "Select a destination to see suggested routes.";
+    }
+  }, [planStatus, planError, itineraries, hasOrigin]);
+
+  const renderLegDescription = useCallback(
+    (leg: PlanItinerary["legs"][number], index: number, legs: PlanItinerary["legs"]) => {
+      if (leg.type === "walk") {
+        if (index === 0 && legs.length > 1) {
+          return `Walk ${formatDistance(leg.distanceMeters)} (${formatMinutes(leg.durationMinutes)}) to ${
+            leg.endStopName ?? "the stop"
+          }`;
+        }
+
+        if (index === legs.length - 1 && legs.length > 1) {
+          return `Walk ${formatDistance(leg.distanceMeters)} (${formatMinutes(leg.durationMinutes)}) to your destination`;
+        }
+
+        return `Walk ${formatDistance(leg.distanceMeters)} (${formatMinutes(leg.durationMinutes)})`;
+      }
+
+      const hopCount = Math.max((leg.stopCount ?? 1) - 1, 0);
+      const stopLabel = hopCount <= 0 ? "non-stop" : hopCount === 1 ? "1 stop" : `${hopCount} stops`;
+      const routeLabel = leg.routeNumber ?? leg.routeName ?? "bus";
+      const destinationLabel = leg.endStopName ?? "your stop";
+
+      return `Take ${routeLabel} to ${destinationLabel} (${stopLabel}, ${formatMinutes(leg.durationMinutes)})`;
+    },
+    []
+  );
+
   const handleSelectPlace = useCallback(
     async (place: PlaceResult) => {
       if (!onSelectLocation) return;
 
       if (place.location) {
         onSelectLocation(place.location);
+        setView("itineraries");
         resetSessionToken();
         return;
       }
@@ -336,10 +425,11 @@ export function RoutesSidebar({
         setPlaceResults((prev) =>
           prev.map((item) => (item.mapboxId === place.mapboxId ? { ...item, location } : item))
         );
+        setView("itineraries");
       }
       resetSessionToken();
     },
-    [fetchLocationDetails, onSelectLocation, resetSessionToken]
+    [fetchLocationDetails, onSelectLocation, resetSessionToken, setView]
   );
 
   return (
@@ -365,28 +455,47 @@ export function RoutesSidebar({
               </Dialog.Close>
             </div>
 
-            <div className="mb-3 grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
-              <button
-                type="button"
-                onClick={() => setView("routes")}
-                className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
-                  view === "routes" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Bus className="h-4 w-4" />
-                Routes
-              </button>
-              <button
-                type="button"
-                onClick={() => setView("places")}
-                className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
-                  view === "places" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <MapPin className="h-4 w-4" />
-                Places
-              </button>
-            </div>
+            {view === "itineraries" ? (
+              <div className="mb-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setView("places")}
+                  className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to places
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-foreground">{selectedLocation?.name ?? "Suggested routes"}</div>
+                  {selectedLocation?.placeName && (
+                    <div className="truncate text-xs text-muted-foreground">{selectedLocation.placeName}</div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => setView("routes")}
+                  className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
+                    view === "routes" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Bus className="h-4 w-4" />
+                  Routes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView("places")}
+                  className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
+                    view === "places" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <MapPin className="h-4 w-4" />
+                  Places
+                </button>
+              </div>
+            )}
 
             {view === "routes" ? (
               <>
@@ -455,7 +564,7 @@ export function RoutesSidebar({
                   </ScrollArea.Root>
                 </div>
               </>
-            ) : (
+            ) : view === "places" ? (
               <>
                 <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
                   <Search className="h-4 w-4 opacity-60" />
@@ -474,6 +583,7 @@ export function RoutesSidebar({
                     <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
                       <ul className="space-y-2 p-2 pr-3">
                         {placesWithDistance.map((place) => {
+                          const activeLocationId = selectedLocation?.id ?? selectedLocationId;
                           const identifiedLocation = place.location;
                           const summaryContext = place.context.join(" • ");
                           const subtitle = place.address || summaryContext || place.placeName;
@@ -488,12 +598,11 @@ export function RoutesSidebar({
                                 : undefined;
                           const distanceLabel =
                             computedDistanceMeters !== undefined
-                              ? `${(computedDistanceMeters / 1000).toFixed(
-                                  computedDistanceMeters >= 1000 ? 1 : 2
-                                )} km away`
+                              ? `${formatDistance(computedDistanceMeters)} away`
                               : "Distance unavailable";
                           const isActive =
-                            identifiedLocation?.id === selectedLocationId || place.mapboxId === selectedLocationId;
+                            (!!activeLocationId &&
+                              (identifiedLocation?.id === activeLocationId || place.mapboxId === activeLocationId));
 
                           return (
                             <li key={place.mapboxId}>
@@ -532,6 +641,82 @@ export function RoutesSidebar({
                     <ScrollArea.Corner />
                   </ScrollArea.Root>
                 </div>
+              </>
+            ) : (
+              <>
+                {!selectedLocation ? (
+                  <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
+                    Choose a destination to view suggested routes.
+                  </div>
+                ) : (
+                  <div className="flex-1 min-h-0">
+                    <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
+                      <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
+                        <div className="space-y-2 p-2 pr-3">
+                          {planStatus !== "success" ? (
+                            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+                              {itineraryStatusMessage}
+                            </div>
+                          ) : !itineraries?.length ? (
+                            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+                              {itineraryStatusMessage ?? "No itineraries found."}
+                            </div>
+                          ) : (
+                            itineraries.map((itinerary, index) => {
+                              const isActive = index === selectedItineraryIndex;
+                              return (
+                                <button
+                                  key={`${itinerary.routeId ?? "walk"}-${index}`}
+                                  type="button"
+                                  onClick={() => onSelectItinerary?.(index, itinerary)}
+                                  className={`w-full rounded-xl border p-3 text-left transition ${
+                                    isActive
+                                      ? "border-blue-500 bg-blue-50/70 shadow-sm"
+                                      : "border-transparent bg-white/70 hover:border-blue-300 hover:bg-blue-50/50"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-lg font-semibold text-foreground">
+                                      {formatMinutes(itinerary.totalDurationMinutes)}
+                                    </div>
+                                    <div className="text-xs font-medium text-muted-foreground">
+                                      {formatDistance(itinerary.totalDistanceMeters)}
+                                    </div>
+                                  </div>
+
+                                  {itinerary.routeNumber && (
+                                    <div className="mt-1 text-xs font-medium uppercase tracking-wide text-blue-600">
+                                      Route {itinerary.routeNumber}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-2 space-y-1.5">
+                                    {itinerary.legs.map((leg, legIndex, legs) => (
+                                      <div key={legIndex} className="flex items-start gap-2 text-xs text-muted-foreground">
+                                        <span className="mt-0.5">
+                                          {leg.type === "walk" ? (
+                                            <Footprints className="h-3.5 w-3.5 opacity-60" />
+                                          ) : (
+                                            <BusFront className="h-3.5 w-3.5 opacity-60" />
+                                          )}
+                                        </span>
+                                        <span>{renderLegDescription(leg, legIndex, legs)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </ScrollArea.Viewport>
+                      <ScrollArea.Scrollbar orientation="vertical">
+                        <ScrollArea.Thumb className="rounded-full bg-border/60" />
+                      </ScrollArea.Scrollbar>
+                      <ScrollArea.Corner />
+                    </ScrollArea.Root>
+                  </div>
+                )}
               </>
             )}
           </Dialog.Content>
