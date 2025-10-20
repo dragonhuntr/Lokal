@@ -278,129 +278,69 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
   }
 
   try {
-    // try to fetch all route details first
-    const response = await fetch(
-      'https://emta.availtec.com/InfoPoint/rest/RouteDetails/GetAllRouteDetails'
-    );
+    // fetch all route details and cache them
+    const response = await fetch('https://emta.availtec.com/InfoPoint/rest/RouteDetails/GetAllRouteDetails');
 
-    if (response.ok) {
-      // if getAllRouteDetails works, cache all routes
-      const VehicleSchema = z.object({
-        BlockFareboxId: z.number(),
-        Destination: z.string(),
-        Direction: z.string(),
-        DirectionLong: z.string(),
-        DisplayStatus: z.string(),
-        Heading: z.number(),
-        LastStop: z.string(),
-        LastUpdated: z.string(),
-        Latitude: z.number(),
-        Longitude: z.number(),
-        Name: z.string(),
-        OccupancyStatusReportLabel: z.string(),
-        RouteId: z.number(),
-        Speed: z.number(),
-        VehicleId: z.number(),
-      });
-      const StopSchema = z.object({
-        Description: z.string(),
-        IsTimePoint: z.boolean(),
-        Latitude: z.number(),
-        Longitude: z.number(),
-        Name: z.string(),
-        StopId: z.number(),
-        StopRecordId: z.number(),
-      });
-      const DirectionSchema = z.object({
-        Dir: z.string(),
-        DirectionDesc: z.string().nullable(),
-        DirectionIconFileName: z.string().nullable(),
-      });
-      const RouteDetailsSchema = z.object({
-        Color: z.string(),
-        Directions: z.array(DirectionSchema),
-        GoogleDescription: z.string(),
-        LongName: z.string(),
-        RouteAbbreviation: z.string(),
-        RouteId: z.number(),
-        ShortName: z.string(),
-        RouteTraceFilename: z.string(),
-        Stops: z.array(StopSchema),
-        Vehicles: z.array(VehicleSchema),
-      });
-      const json: unknown = await response.json();
-      const allRoutes = z.array(RouteDetailsSchema).parse(json);
-      routeDetailsCache = allRoutes.reduce((acc: Record<number, RouteDetails>, route: RouteDetails) => {
-        acc[route.RouteId] = route;
-        return acc;
-      }, {});
-      lastRouteDetailsFetchTime = Date.now();
-
-      if (!routeDetailsCache[routeId]) {
-        throw new Error(`Route ${routeId} not found in fetched route details`);
-      }
-
-      return routeDetailsCache[routeId];
-    } else {
-      // fall back to single route fetch if getAllRouteDetails fails
-      const singleResponse = await fetch(
-        `https://emta.availtec.com/InfoPoint/rest/RouteDetails/Get/${routeId}`
-      );
-
-      if (!singleResponse.ok) {
-        throw new Error(`API request failed with status ${singleResponse.status}`);
-      }
-
-      const json: unknown = await singleResponse.json();
-      const VehicleSchema = z.object({
-        BlockFareboxId: z.number(),
-        Destination: z.string(),
-        Direction: z.string(),
-        DirectionLong: z.string(),
-        DisplayStatus: z.string(),
-        Heading: z.number(),
-        LastStop: z.string(),
-        LastUpdated: z.string(),
-        Latitude: z.number(),
-        Longitude: z.number(),
-        Name: z.string(),
-        OccupancyStatusReportLabel: z.string(),
-        RouteId: z.number(),
-        Speed: z.number(),
-        VehicleId: z.number(),
-      });
-      const StopSchema = z.object({
-        Description: z.string(),
-        IsTimePoint: z.boolean(),
-        Latitude: z.number(),
-        Longitude: z.number(),
-        Name: z.string(),
-        StopId: z.number(),
-        StopRecordId: z.number(),
-      });
-      const DirectionSchema = z.object({
-        Dir: z.string(),
-        DirectionDesc: z.string().nullable(),
-        DirectionIconFileName: z.string().nullable(),
-      });
-      const RouteDetailsSchema = z.object({
-        Color: z.string(),
-        Directions: z.array(DirectionSchema),
-        GoogleDescription: z.string(),
-        LongName: z.string(),
-        RouteAbbreviation: z.string(),
-        RouteId: z.number(),
-        ShortName: z.string(),
-        RouteTraceFilename: z.string(),
-        Stops: z.array(StopSchema),
-        Vehicles: z.array(VehicleSchema),
-      });
-      const routeDetails = RouteDetailsSchema.parse(json);
-      routeDetailsCache[routeId] = routeDetails;
-      lastRouteDetailsFetchTime = Date.now();
-
-      return routeDetails;
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
     }
+
+    const VehicleSchema = z.object({
+      BlockFareboxId: z.number(),
+      Destination: z.string(),
+      Direction: z.string(),
+      DirectionLong: z.string(),
+      DisplayStatus: z.string(),
+      Heading: z.number(),
+      LastStop: z.string(),
+      LastUpdated: z.string(),
+      Latitude: z.number(),
+      Longitude: z.number(),
+      Name: z.string(),
+      OccupancyStatusReportLabel: z.string(),
+      RouteId: z.number(),
+      Speed: z.number(),
+      VehicleId: z.number(),
+    });
+    const StopSchema = z.object({
+      Description: z.string(),
+      IsTimePoint: z.boolean(),
+      Latitude: z.number(),
+      Longitude: z.number(),
+      Name: z.string(),
+      StopId: z.number(),
+      StopRecordId: z.number(),
+    });
+    const DirectionSchema = z.object({
+      Dir: z.string(),
+      DirectionDesc: z.string().nullable(),
+      DirectionIconFileName: z.string().nullable(),
+    });
+    const RouteDetailsSchema = z.object({
+      Color: z.string(),
+      Directions: z.array(DirectionSchema),
+      GoogleDescription: z.string(),
+      LongName: z.string(),
+      RouteAbbreviation: z.string(),
+      RouteId: z.number(),
+      ShortName: z.string(),
+      RouteTraceFilename: z.string(),
+      Stops: z.array(StopSchema),
+      Vehicles: z.array(VehicleSchema),
+    });
+    const json: unknown = await response.json();
+    const allRoutes = z.array(RouteDetailsSchema).parse(json);
+    routeDetailsCache = allRoutes.reduce((acc: Record<number, RouteDetails>, route: RouteDetails) => {
+      acc[route.RouteId] = route;
+      return acc;
+    }, {});
+    lastRouteDetailsFetchTime = Date.now();
+
+    if (!routeDetailsCache[routeId]) {
+      throw new Error(`Route ${routeId} not found in fetched route details`);
+    }
+
+    return routeDetailsCache[routeId];
   } catch (error) {
     console.error("Error fetching route details:", error);
     // if error occurs, return cached data if available
