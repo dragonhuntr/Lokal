@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { Menu, X, Search, MapPin, Bus, Footprints, BusFront, ArrowLeft } from "lucide-react";
+import { Menu, X, Search, MapPin, Bus, Footprints, BusFront, ArrowLeft, Bookmark } from "lucide-react";
 import { env } from "@/env";
 import { api } from "@/trpc/react";
+import { useSession } from "@/trpc/session";
+import { AuthDialog } from "@/app/_components/auth-dialog";
+import { ProfileDialog } from "@/app/_components/profile-dialog";
 import type { RouterOutputs } from "@/trpc/react";
+import { useSavedRoutes } from "@/trpc/saved-routes";
 import type { PlanItinerary } from "@/server/routing/service";
 
 const RESULT_LIMIT = 10; // RANGE IS 0 TO 10
@@ -25,7 +29,7 @@ export interface LocationSearchResult {
   context: string[];
 }
 
-type SidebarView = "routes" | "places" | "itineraries";
+type SidebarView = "routes" | "places" | "itineraries" | "saved";
 
 type PlanStatus = "idle" | "loading" | "success" | "error";
 
@@ -145,6 +149,12 @@ export function RoutesSidebar({
   const requestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
   const previousLocationIdRef = useRef<string | null>(null);
+  const session = useSession();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
+  const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
+  const saved = useSavedRoutes();
 
   const { data: routes, isLoading: areRoutesLoading } = api.bus.getRoutes.useQuery();
 
@@ -160,6 +170,24 @@ export function RoutesSidebar({
 
     previousLocationIdRef.current = currentId;
   }, [selectedLocation, view]);
+
+  useEffect(() => {
+    if (session.status === "authenticated" && pendingActionRef.current) {
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      action();
+    }
+  }, [session.status]);
+
+  const requireAuth = useCallback((action: () => void, defaultMode: "signin" | "signup" = "signin") => {
+    if (session.status !== "authenticated") {
+      pendingActionRef.current = action;
+      setAuthDefaultMode(defaultMode);
+      setAuthOpen(true);
+      return;
+    }
+    action();
+  }, [session.status]);
 
   const ensureSessionToken = useCallback(() => {
     if (sessionTokenRef.current) return sessionTokenRef.current;
@@ -412,24 +440,26 @@ export function RoutesSidebar({
     async (place: PlaceResult) => {
       if (!onSelectLocation) return;
 
-      if (place.location) {
-        onSelectLocation(place.location);
-        setView("itineraries");
-        resetSessionToken();
-        return;
-      }
+      requireAuth(async () => {
+        if (place.location) {
+          onSelectLocation(place.location);
+          setView("itineraries");
+          resetSessionToken();
+          return;
+        }
 
-      const location = await fetchLocationDetails(place.mapboxId);
-      if (location) {
-        onSelectLocation(location);
-        setPlaceResults((prev) =>
-          prev.map((item) => (item.mapboxId === place.mapboxId ? { ...item, location } : item))
-        );
-        setView("itineraries");
-      }
-      resetSessionToken();
+        const location = await fetchLocationDetails(place.mapboxId);
+        if (location) {
+          onSelectLocation(location);
+          setPlaceResults((prev) =>
+            prev.map((item) => (item.mapboxId === place.mapboxId ? { ...item, location } : item))
+          );
+          setView("itineraries");
+        }
+        resetSessionToken();
+      });
     },
-    [fetchLocationDetails, onSelectLocation, resetSessionToken, setView]
+    [fetchLocationDetails, onSelectLocation, resetSessionToken, setView, requireAuth]
   );
 
   return (
@@ -473,7 +503,7 @@ export function RoutesSidebar({
                 </div>
               </div>
             ) : (
-              <div className="mb-3 grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
+              <div className="mb-3 grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-1">
                 <button
                   type="button"
                   onClick={() => setView("routes")}
@@ -494,6 +524,23 @@ export function RoutesSidebar({
                   <MapPin className="h-4 w-4" />
                   Places
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (session.status !== "authenticated") {
+                      setAuthDefaultMode("signin");
+                      setAuthOpen(true);
+                      return;
+                    }
+                    setView("saved");
+                  }}
+                  className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
+                    view === "saved" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Bookmark className="h-4 w-4" />
+                  Saved
+                </button>
               </div>
             )}
 
@@ -503,7 +550,8 @@ export function RoutesSidebar({
                   <Search className="h-4 w-4 opacity-60" />
                   <input
                     value={routeQuery}
-                    onChange={(event) => setRouteQuery(event.target.value)}
+                    onChange={(event) => requireAuth(() => setRouteQuery(event.target.value))}
+                    onFocus={() => { if (session.status !== "authenticated") { setAuthDefaultMode("signin"); setAuthOpen(true); } }}
                     placeholder="Search routes…"
                     className="h-9 w-full bg-transparent text-sm outline-none"
                   />
@@ -570,7 +618,8 @@ export function RoutesSidebar({
                   <Search className="h-4 w-4 opacity-60" />
                   <input
                     value={placeQuery}
-                    onChange={(event) => setPlaceQuery(event.target.value)}
+                    onChange={(event) => requireAuth(() => setPlaceQuery(event.target.value))}
+                    onFocus={() => { if (session.status !== "authenticated") { setAuthDefaultMode("signin"); setAuthOpen(true); } }}
                     placeholder="Search locations or buildings…"
                     className="h-9 w-full bg-transparent text-sm outline-none"
                   />
@@ -679,8 +728,30 @@ export function RoutesSidebar({
                                     <div className="text-lg font-semibold text-foreground">
                                       {formatMinutes(itinerary.totalDurationMinutes)}
                                     </div>
-                                    <div className="text-xs font-medium text-muted-foreground">
-                                      {formatDistance(itinerary.totalDistanceMeters)}
+                                    <div className="flex items-center gap-2">
+                                      {itinerary.routeId && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const rid = itinerary.routeId!;
+                                            requireAuth(() => {
+                                              if (saved.isSaved(rid)) {
+                                                void saved.remove(rid);
+                                              } else {
+                                                void saved.save(rid);
+                                              }
+                                            });
+                                          }}
+                                          title={saved.isSaved(itinerary.routeId) ? "Unsave route" : "Save route"}
+                                          className={`inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs ${saved.isSaved(itinerary.routeId) ? "bg-blue-50 border-blue-300 text-blue-700" : ""}`}
+                                        >
+                                          <Bookmark className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                      <div className="text-xs font-medium text-muted-foreground">
+                                        {formatDistance(itinerary.totalDistanceMeters)}
+                                      </div>
                                     </div>
                                   </div>
 
@@ -719,9 +790,53 @@ export function RoutesSidebar({
                 )}
               </>
             )}
+            <div className="mt-3 border-t pt-3">
+              {session.status !== "authenticated" ? (
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setAuthDefaultMode("signin"); setAuthOpen(true); }}
+                    className="inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs"
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthDefaultMode("signup"); setAuthOpen(true); }}
+                    className="inline-flex h-8 items-center justify-center rounded-md bg-foreground px-3 text-xs font-medium text-background"
+                  >
+                    Sign up
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="truncate">
+                    Signed in as <span className="font-medium">{session.user?.name ?? session.user?.email}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProfileOpen(true)}
+                      className="inline-flex h-8 items-center justify-center rounded-md border px-2"
+                    >
+                      Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => session.signOut()}
+                      className="inline-flex h-8 items-center justify-center rounded-md px-2 text-red-600 hover:bg-red-50"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} defaultMode={authDefaultMode} />
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { createHmac, randomBytes, scrypt, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
 import { env } from "@/env";
+import { cookies } from "next/headers";
 
 const scryptAsync = promisify(scrypt);
 
@@ -138,3 +139,20 @@ export const verifyPassword = async (
 };
 
 export type { JwtClaims, TokenPair };
+
+export const getClaimsFromCookies = async (): Promise<JwtClaims | null> => {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+    if (!token) return null;
+    return verifyJwt(token, "access");
+  } catch (_err) {
+    return null;
+  }
+};
+
+export const requireSelfOrThrow = (userId: string, claims: JwtClaims | null) => {
+  if (!claims || claims.sub !== userId) {
+    throw new Error("Unauthorized");
+  }
+};
