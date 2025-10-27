@@ -202,10 +202,16 @@ function buildDirectWalk(origin: Coordinate, destination: Coordinate): PlanItine
     end: destination,
   };
 
+  // Generate a unique route ID for walking routes based on coordinates
+  const walkRouteId = `walk-${origin.latitude.toFixed(6)}-${origin.longitude.toFixed(6)}-${destination.latitude.toFixed(6)}-${destination.longitude.toFixed(6)}`;
+
   return {
     legs: [leg],
     totalDistanceMeters: distanceMeters,
     totalDurationMinutes: durationMinutes,
+    routeId: walkRouteId,
+    routeName: "Walking Route",
+    routeNumber: "Walk",
   };
 }
 

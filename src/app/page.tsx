@@ -45,19 +45,10 @@ export default function Home() {
   const handleSelectItinerary = useCallback(
     (index: number, itinerary: PlanItinerary) => {
       setSelectedItineraryIndex(index);
-
-      if (!routes || !itinerary.routeId) {
-        if (!itinerary.routeId) {
-          setSelectedRoute(null);
-        }
-        return;
-      }
-
-      const numericRouteId = Number(String(itinerary.routeId).replace(/^\D+/u, ""));
-      const matchingRoute = routes.find((route) => route.RouteId === numericRouteId) ?? null;
-      setSelectedRoute(matchingRoute);
+      // Don't automatically select the route when an itinerary is clicked
+      // Route selection should only happen via the save bookmark button or manual route selection
     },
-    [routes]
+    []
   );
 
   useEffect(() => {
@@ -151,30 +142,8 @@ export default function Home() {
     };
   }, [selectedLocation, userLocation]);
 
-  useEffect(() => {
-    if (!selectedLocation) {
-      return;
-    }
-
-    if (!planItineraries || !planItineraries.length) {
-      setSelectedRoute(null);
-      return;
-    }
-
-    const itinerary = planItineraries[selectedItineraryIndex] ?? planItineraries[0];
-    if (!itinerary?.routeId) {
-      setSelectedRoute(null);
-      return;
-    }
-
-    if (!routes) {
-      return;
-    }
-
-    const numericRouteId = Number(String(itinerary.routeId).replace(/^\D+/u, ""));
-    const matchingRoute = routes.find((route) => route.RouteId === numericRouteId) ?? null;
-    setSelectedRoute(matchingRoute);
-  }, [planItineraries, selectedItineraryIndex, routes, selectedLocation]);
+  // Removed automatic route selection when itinerary changes
+  // Routes should only be selected via the save bookmark button or manual route selection
 
   return (
     <main className="relative min-h-screen">

@@ -410,6 +410,10 @@ export function RoutesSidebar({
     }
   }, [planStatus, planError, itineraries, hasOrigin]);
 
+  const busItineraries = useMemo(() => {
+    return (itineraries ?? []).filter((it) => !!it.routeId);
+  }, [itineraries]);
+
   const renderLegDescription = useCallback(
     (leg: PlanItinerary["legs"][number], index: number, legs: PlanItinerary["legs"]) => {
       if (leg.type === "walk") {
@@ -691,6 +695,62 @@ export function RoutesSidebar({
                   </ScrollArea.Root>
                 </div>
               </>
+            ) : view === "saved" ? (
+              <>
+                <div className="mb-2 text-xs opacity-60">
+                  {saved.isFetching ? "Loading..." : `${saved.routes.length} saved route${saved.routes.length === 1 ? "" : "s"}`}
+                </div>
+                <div className="flex-1 min-h-0">
+                  <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
+                    <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
+                      <ul className="space-y-2 p-2 pr-3">
+                        {saved.routes.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+                            No saved routes yet. Save a route from the itineraries view!
+                          </div>
+                        ) : (
+                          saved.routes.map((savedRoute) => (
+                            <li key={savedRoute.id} className="flex items-start gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void saved.remove(savedRoute.routeId);
+                                }}
+                                aria-label="Remove saved route"
+                                className="flex-shrink-0 mt-3 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
+                              >
+                                <Bookmark className="h-4 w-4" fill="currentColor" />
+                              </button>
+                              <div className="flex-1 rounded-2xl border bg-card px-4 py-4 shadow-sm">
+                                <div className="min-w-0">
+                                  {savedRoute.nickname && (
+                                    <div className="truncate text-sm font-medium text-foreground" title={savedRoute.nickname}>
+                                      {savedRoute.nickname.length > 20 
+                                        ? savedRoute.nickname.substring(0, 20) + '...' 
+                                        : savedRoute.nickname}
+                                    </div>
+                                  )}
+                                  <div className="truncate text-lg font-semibold tracking-tight text-foreground">
+                                    {savedRoute.route.name}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    Route {savedRoute.route.number}
+                                  </div>
+                                </div>
+                              </div>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </ScrollArea.Viewport>
+                    <ScrollArea.Scrollbar orientation="vertical">
+                      <ScrollArea.Thumb className="rounded-full bg-border/60" />
+                    </ScrollArea.Scrollbar>
+                    <ScrollArea.Corner />
+                  </ScrollArea.Root>
+                </div>
+              </>
             ) : (
               <>
                 {!selectedLocation ? (
@@ -711,49 +771,66 @@ export function RoutesSidebar({
                               {itineraryStatusMessage ?? "No itineraries found."}
                             </div>
                           ) : (
-                            itineraries.map((itinerary, index) => {
+                            (itineraries ?? []).map((itinerary, index) => {
                               const isActive = index === selectedItineraryIndex;
                               return (
-                                <button
-                                  key={`${itinerary.routeId ?? "walk"}-${index}`}
-                                  type="button"
-                                  onClick={() => onSelectItinerary?.(index, itinerary)}
-                                  className={`w-full rounded-xl border p-3 text-left transition ${
-                                    isActive
-                                      ? "border-blue-500 bg-blue-50/70 shadow-sm"
-                                      : "border-transparent bg-white/70 hover:border-blue-300 hover:bg-blue-50/50"
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="text-lg font-semibold text-foreground">
-                                      {formatMinutes(itinerary.totalDurationMinutes)}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      {itinerary.routeId && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const rid = itinerary.routeId!;
-                                            requireAuth(() => {
-                                              if (saved.isSaved(rid)) {
-                                                void saved.remove(rid);
-                                              } else {
-                                                void saved.save(rid);
-                                              }
-                                            });
-                                          }}
-                                          title={saved.isSaved(itinerary.routeId) ? "Unsave route" : "Save route"}
-                                          className={`inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs ${saved.isSaved(itinerary.routeId) ? "bg-blue-50 border-blue-300 text-blue-700" : ""}`}
-                                        >
-                                          <Bookmark className="h-3.5 w-3.5" />
-                                        </button>
-                                      )}
+                                <div key={`${itinerary.routeId ?? "walk"}-${index}`} className="flex items-start gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      const rid = itinerary.routeId;
+                                      
+                                      console.log('Bookmark clicked!', { rid, itinerary, hasRouteId: !!rid });
+
+                                      if (!rid) {
+                                        console.log('No route ID, skipping save');
+                                        return;
+                                      }
+
+                                      requireAuth(() => {
+                                        console.log('Auth passed, saving/removing route', rid);
+                                        if (saved.isSaved(rid)) {
+                                          console.log('Removing route', rid);
+                                          void saved.remove(rid);
+                                        } else {
+                                          console.log('Saving route', rid);
+                                          // Use the destination name as the nickname (save full name)
+                                          const nickname = selectedLocation?.name || selectedLocation?.placeName || undefined;
+                                          void saved.save(rid, nickname);
+                                          // After saving, select the route for display
+                                          if (onSelectRoute) {
+                                            const numericRouteId = Number(String(rid).replace(/^\D+/u, ""));
+                                            const matchingRoute = routes?.find((route) => route.RouteId === numericRouteId);
+                                            if (matchingRoute) {
+                                              onSelectRoute(matchingRoute);
+                                            }
+                                          }
+                                        }
+                                      });
+                                    }}
+                                    aria-label={itinerary.routeId && saved.isSaved(itinerary.routeId) ? "Unsave route" : "Save route"}
+                                    className={`flex-shrink-0 mt-3 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${itinerary.routeId && saved.isSaved(itinerary.routeId) ? "bg-blue-50 border-blue-300 text-blue-700" : "border-border/70 text-muted-foreground hover:bg-muted"}`}
+                                  >
+                                    <Bookmark className="h-4 w-4" fill={itinerary.routeId && saved.isSaved(itinerary.routeId) ? "currentColor" : "none"} />
+                                  </button>
+                                  <div
+                                    onClick={() => onSelectItinerary?.(index, itinerary)}
+                                    className={`flex-1 rounded-xl border p-3 cursor-pointer transition ${
+                                      isActive
+                                        ? "border-blue-500 bg-blue-50/70 shadow-sm"
+                                        : "border-transparent bg-white/70 hover:border-blue-300 hover:bg-blue-50/50"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-lg font-semibold text-foreground">
+                                        {formatMinutes(itinerary.totalDurationMinutes)}
+                                      </div>
                                       <div className="text-xs font-medium text-muted-foreground">
                                         {formatDistance(itinerary.totalDistanceMeters)}
                                       </div>
                                     </div>
-                                  </div>
 
                                   {itinerary.routeNumber && (
                                     <div className="mt-1 text-xs font-medium uppercase tracking-wide text-blue-600">
@@ -775,7 +852,8 @@ export function RoutesSidebar({
                                       </div>
                                     ))}
                                   </div>
-                                </button>
+                                  </div>
+                                </div>
                               );
                             })
                           )}

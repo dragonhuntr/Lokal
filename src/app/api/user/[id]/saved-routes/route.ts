@@ -4,15 +4,16 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { getClaimsFromCookies, requireSelfOrThrow } from "@/server/auth/service";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const claims = await getClaimsFromCookies();
-    requireSelfOrThrow(params.id, claims);
+    requireSelfOrThrow(id, claims);
 
     const saved = await db.savedRoute.findMany({
-      where: { userId: params.id },
+      where: { userId: id },
       include: {
         route: {
           select: {
@@ -50,25 +51,42 @@ const SaveSchema = z.object({
 
 export async function POST(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const claims = await getClaimsFromCookies();
-    requireSelfOrThrow(params.id, claims);
+    requireSelfOrThrow(id, claims);
 
     const body = await request.json();
     const { routeId, nickname } = SaveSchema.parse(body);
 
-    const existing = await db.savedRoute.findFirst({ where: { userId: params.id, routeId } });
+    const existing = await db.savedRoute.findFirst({ where: { userId: id, routeId } });
     if (existing) {
       return NextResponse.json({ savedRoute: existing }, { status: 200 });
     }
 
-    // Ensure route exists
-    const route = await db.route.findUnique({ where: { id: routeId } });
+    // Check if route exists, if not and it's a walking route, create it
+    let route = await db.route.findUnique({ where: { id: routeId } });
+    
     if (!route) {
-      return NextResponse.json({ error: "Route not found" }, { status: 404 });
+      // If it's a walking route (starts with "walk-"), create it
+      if (routeId.startsWith("walk-")) {
+        route = await db.route.create({
+          data: {
+            id: routeId,
+            name: "Walking Route",
+            number: "Walk",
+            origin: "Your Location",
+            destination: "Destination",
+            totalStops: 0,
+            duration: 0,
+          },
+        });
+      } else {
+        return NextResponse.json({ error: "Route not found" }, { status: 404 });
+      }
     }
 
     const created = await db.savedRoute.create({
-      data: { userId: params.id, routeId, nickname },
+      data: { userId: id, routeId, nickname },
     });
 
     return NextResponse.json({ savedRoute: created }, { status: 201 });

@@ -284,6 +284,32 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
+    "/api/auth/me": {
+      get: {
+        tags: ["Auth"],
+        summary: "Get current user",
+        description: "Returns the authenticated user's profile derived from the access token cookie.",
+        security: [{ CookieAuth: [] }],
+        responses: {
+          "200": {
+            description: "Current user returned successfully.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["user"],
+                  properties: { user: { $ref: "#/components/schemas/AuthUser" } },
+                },
+              },
+            },
+          },
+          "401": {
+            description: "Missing or invalid session.",
+            content: { "application/json": { schema: { $ref: errorReference } } },
+          },
+        },
+      },
+    },
     "/api/directions": {
       post: {
         tags: ["Routing"],
@@ -735,73 +761,36 @@ export const openApiDocument: OpenAPIV3.Document = {
       get: {
         tags: ["Users"],
         summary: "Get user profile",
-        description: "Endpoint stub for retrieving a user profile.",
+        description: "Returns the authenticated user's profile. The path id must match the subject.",
+        security: [{ CookieAuth: [] }],
         parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "User identifier.",
-          },
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
         ],
         responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
+          "200": {
+            description: "Profile returned successfully.",
+            content: { "application/json": { schema: { type: "object", required: ["user"], properties: { user: { $ref: "#/components/schemas/AuthUser" } } } } },
           },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+          "404": { description: "User not found.", content: { "application/json": { schema: { $ref: errorReference } } } },
         },
       },
       put: {
         tags: ["Users"],
         summary: "Update user profile",
-        description: "Endpoint stub for updating a user profile.",
+        description: "Updates the user's display name.",
+        security: [{ CookieAuth: [] }],
         parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "User identifier.",
-          },
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
         ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/UpdateUserRequest" } } },
         },
-      },
-      delete: {
-        tags: ["Users"],
-        summary: "Delete user profile",
-        description: "Endpoint stub for deleting a user account.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "User identifier.",
-          },
-        ],
         responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
+          "200": { description: "Profile updated.", content: { "application/json": { schema: { type: "object", required: ["user"], properties: { user: { $ref: "#/components/schemas/AuthUser" } } } } } },
+          "400": { description: "Validation failed.", content: { "application/json": { schema: { $ref: validationErrorReference } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
         },
       },
     },
@@ -809,25 +798,62 @@ export const openApiDocument: OpenAPIV3.Document = {
       put: {
         tags: ["Users"],
         summary: "Update user preferences",
-        description: "Endpoint stub for persisting user travel preferences.",
+        description: "Updates notification preferences for the user.",
+        security: [{ CookieAuth: [] }],
         parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "User identifier.",
-          },
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/UpdatePreferencesRequest" } } },
+        },
+        responses: {
+          "200": { description: "Preferences updated.", content: { "application/json": { schema: { type: "object", required: ["user"], properties: { user: { $ref: "#/components/schemas/AuthUser" } } } } } },
+          "400": { description: "Validation failed.", content: { "application/json": { schema: { $ref: validationErrorReference } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+        },
+      },
+    },
+    "/api/user/{id}/saved-routes": {
+      get: {
+        tags: ["Users"],
+        summary: "List saved routes",
+        description: "Returns routes the user has saved.",
+        security: [{ CookieAuth: [] }],
+        parameters: [ { name: "id", in: "path", required: true, schema: { type: "string" } } ],
+        responses: {
+          "200": { description: "Saved routes returned.", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedRoutesResponse" } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+        },
+      },
+      post: {
+        tags: ["Users"],
+        summary: "Save a route",
+        description: "Saves a transit route for the user.",
+        security: [{ CookieAuth: [] }],
+        parameters: [ { name: "id", in: "path", required: true, schema: { type: "string" } } ],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/SaveRouteRequest" } } } },
+        responses: {
+          "201": { description: "Route saved.", content: { "application/json": { schema: { type: "object", required: ["savedRoute"], properties: { savedRoute: { $ref: "#/components/schemas/SavedRouteItem" } } } } } },
+          "400": { description: "Validation failed.", content: { "application/json": { schema: { $ref: validationErrorReference } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+          "404": { description: "Route not found.", content: { "application/json": { schema: { $ref: errorReference } } } },
+        },
+      },
+    },
+    "/api/user/{id}/saved-routes/{routeId}": {
+      delete: {
+        tags: ["Users"],
+        summary: "Remove a saved route",
+        description: "Deletes a saved route for the user.",
+        security: [{ CookieAuth: [] }],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "routeId", in: "path", required: true, schema: { type: "string" } },
         ],
         responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
+          "200": { description: "Removed.", content: { "application/json": { schema: { $ref: "#/components/schemas/SuccessResponse" } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
         },
       },
     },
@@ -912,6 +938,58 @@ export const openApiDocument: OpenAPIV3.Document = {
             nullable: true,
             description: "Optional display name.",
           },
+          notificationsEnabled: {
+            type: "boolean",
+            description: "Whether user opted in to notifications.",
+          },
+        },
+      },
+      UpdateUserRequest: {
+        type: "object",
+        required: ["name"],
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description: "Display name of the user.",
+          },
+        },
+      },
+      UpdatePreferencesRequest: {
+        type: "object",
+        required: ["notificationsEnabled"],
+        properties: {
+          notificationsEnabled: {
+            type: "boolean",
+            description: "Enable or disable notifications.",
+          },
+        },
+      },
+      SaveRouteRequest: {
+        type: "object",
+        required: ["routeId"],
+        properties: {
+          routeId: { type: "string", description: "ID of the route to save." },
+          nickname: { type: "string", nullable: true, maxLength: 120 },
+        },
+      },
+      SavedRouteItem: {
+        type: "object",
+        required: ["id", "routeId", "createdAt"],
+        properties: {
+          id: { type: "string" },
+          routeId: { type: "string" },
+          nickname: { type: "string", nullable: true },
+          createdAt: { type: "string", format: "date-time" },
+          route: { $ref: "#/components/schemas/Route" },
+        },
+      },
+      SavedRoutesResponse: {
+        type: "object",
+        required: ["savedRoutes"],
+        properties: {
+          savedRoutes: { type: "array", items: { $ref: "#/components/schemas/SavedRouteItem" } },
         },
       },
       AuthSuccessResponse: {
