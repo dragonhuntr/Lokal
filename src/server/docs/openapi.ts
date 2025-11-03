@@ -315,7 +315,7 @@ export const openApiDocument: OpenAPIV3.Document = {
         tags: ["Routing"],
         summary: "Plan an itinerary",
         description:
-          "Builds suggested itineraries between two geographic coordinates. All distances are expressed in meters and durations in minutes.",
+          "Builds suggested itineraries between coordinates, including optional multi-stop journeys. All distances are expressed in meters and durations in minutes.",
         requestBody: {
           required: true,
           content: {
@@ -327,6 +327,17 @@ export const openApiDocument: OpenAPIV3.Document = {
                     origin: { latitude: 14.5995, longitude: 120.9842 },
                     destination: { latitude: 14.5764, longitude: 121.0851 },
                     maxWalkingDistanceMeters: 800,
+                    limit: 3,
+                  },
+                },
+                multiStopJourney: {
+                  summary: "Plan a journey with two intermediate stops",
+                  value: {
+                    origin: { latitude: 14.5995, longitude: 120.9842 },
+                    destinations: [
+                      { latitude: 14.5821, longitude: 121.0123 },
+                      { latitude: 14.5764, longitude: 121.0851 },
+                    ],
                     limit: 3,
                   },
                 },
@@ -1035,13 +1046,30 @@ export const openApiDocument: OpenAPIV3.Document = {
       },
       DirectionsRequest: {
         type: "object",
-        required: ["origin", "destination"],
+        required: ["origin"],
+        allOf: [
+          {
+            anyOf: [
+              { required: ["destination"] },
+              { required: ["destinations"] },
+            ],
+          },
+        ],
         properties: {
           origin: {
             $ref: "#/components/schemas/Coordinate",
           },
           destination: {
             $ref: "#/components/schemas/Coordinate",
+            description:
+              "Optional single destination. When provided with `destinations`, it is treated as the final stop in the journey.",
+          },
+          destinations: {
+            type: "array",
+            minItems: 1,
+            items: { $ref: "#/components/schemas/Coordinate" },
+            description:
+              "Ordered list of stops to visit after the origin. If supplied, the planner will return multi-stop itineraries.",
           },
           departureTime: {
             type: "string",

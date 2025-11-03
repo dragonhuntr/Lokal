@@ -11,7 +11,11 @@ export interface Coordinate {
 
 export interface PlanRequest {
   origin: Coordinate;
-  destination: Coordinate;
+  /**
+   * @deprecated Use `destinations` to supply one or more stops instead.
+   */
+  destination?: Coordinate;
+  destinations?: Coordinate[];
   departureTime?: Date;
   maxWalkingDistanceMeters?: number;
   limit?: number;
@@ -120,6 +124,8 @@ async function fetchNetwork() {
   });
 }
 
+type Network = Awaited<ReturnType<typeof fetchNetwork>>;
+
 interface Candidate {
   route: PrismaRoute & { stops: Stop[] };
   startStop: Stop;
@@ -215,17 +221,12 @@ function buildDirectWalk(origin: Coordinate, destination: Coordinate): PlanItine
   };
 }
 
-export async function planItineraries(request: PlanRequest): Promise<PlanResponse> {
-  const {
-    origin,
-    destination,
-    maxWalkingDistanceMeters = DEFAULT_MAX_WALK_METERS,
-    limit: rawLimit,
-  } = request;
-
-  const limit = normalizeLimit(rawLimit);
-  const network = await fetchNetwork();
-
+function findCandidates(
+  network: Network,
+  origin: Coordinate,
+  destination: Coordinate,
+  maxWalkingDistanceMeters: number
+): Candidate[] {
   const candidates: Candidate[] = [];
 
   for (const route of network) {
@@ -277,6 +278,18 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
     }
   }
 
+  return candidates;
+}
+
+function planSegmentItineraries(
+  network: Network,
+  origin: Coordinate,
+  destination: Coordinate,
+  maxWalkingDistanceMeters: number,
+  limit: number
+): PlanItinerary[] {
+  const candidates = findCandidates(network, origin, destination, maxWalkingDistanceMeters);
+
   const itineraries: PlanItinerary[] = candidates
     .map((candidate) => buildItinerary(candidate, origin, destination))
     .sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes)
@@ -289,6 +302,121 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
     itineraries.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
     itineraries.splice(limit);
   }
+
+  return itineraries;
+}
+
+interface CombinedItinerary {
+  legs: PlanLeg[];
+  totalDistanceMeters: number;
+  totalDurationMinutes: number;
+  firstSegment?: Pick<PlanItinerary, "routeId" | "routeName" | "routeNumber" | "startStopId">;
+  lastSegment?: Pick<PlanItinerary, "endStopId">;
+  segmentCount: number;
+}
+
+export async function planItineraries(request: PlanRequest): Promise<PlanResponse> {
+  const {
+    origin,
+    destination,
+    destinations,
+    maxWalkingDistanceMeters = DEFAULT_MAX_WALK_METERS,
+    limit: rawLimit,
+  } = request;
+
+  const normalizedDestinations = destinations?.length
+    ? destinations
+    : destination
+      ? [destination]
+      : [];
+
+  if (!normalizedDestinations.length) {
+    throw new Error("At least one destination must be provided");
+  }
+
+  const limit = normalizeLimit(rawLimit);
+  const network = await fetchNetwork();
+
+  if (normalizedDestinations.length === 1) {
+    const [finalDestination] = normalizedDestinations;
+    return {
+      generatedAt: new Date().toISOString(),
+      itineraries: planSegmentItineraries(
+        network,
+        origin,
+        finalDestination,
+        maxWalkingDistanceMeters,
+        limit
+      ),
+    };
+  }
+
+  let currentOrigin = origin;
+  let combined: CombinedItinerary[] = [
+    {
+      legs: [],
+      totalDistanceMeters: 0,
+      totalDurationMinutes: 0,
+      segmentCount: 0,
+    },
+  ];
+
+  normalizedDestinations.forEach((currentDestination) => {
+    const segmentItineraries = planSegmentItineraries(
+      network,
+      currentOrigin,
+      currentDestination,
+      maxWalkingDistanceMeters,
+      limit
+    );
+
+    const nextCombined: CombinedItinerary[] = [];
+
+    for (const partial of combined) {
+      for (const segment of segmentItineraries) {
+        nextCombined.push({
+          legs: [...partial.legs, ...segment.legs],
+          totalDistanceMeters: partial.totalDistanceMeters + segment.totalDistanceMeters,
+          totalDurationMinutes: partial.totalDurationMinutes + segment.totalDurationMinutes,
+          firstSegment: partial.firstSegment ?? {
+            routeId: segment.routeId,
+            routeName: segment.routeName,
+            routeNumber: segment.routeNumber,
+            startStopId: segment.startStopId,
+          },
+          lastSegment: { endStopId: segment.endStopId },
+          segmentCount: partial.segmentCount + 1,
+        });
+      }
+    }
+
+    nextCombined.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
+    combined = nextCombined.slice(0, limit);
+    currentOrigin = currentDestination;
+  });
+
+  const itineraries: PlanItinerary[] = combined.map((entry) => {
+    const isMultiSegment = entry.segmentCount > 1;
+    const routeName = isMultiSegment
+      ? `Multi-stop journey (${entry.segmentCount} segments)`
+      : entry.firstSegment?.routeName;
+
+    const routeNumber = isMultiSegment ? undefined : entry.firstSegment?.routeNumber;
+
+    return {
+      legs: entry.legs,
+      totalDistanceMeters: entry.totalDistanceMeters,
+      totalDurationMinutes: entry.totalDurationMinutes,
+      routeId: isMultiSegment ? undefined : entry.firstSegment?.routeId,
+      routeName,
+      routeNumber,
+      startStopId: entry.firstSegment?.startStopId,
+      endStopId: entry.lastSegment?.endStopId,
+    };
+  });
+
+  itineraries.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
+  itineraries.splice(limit);
 
   return {
     generatedAt: new Date().toISOString(),

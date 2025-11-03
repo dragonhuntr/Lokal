@@ -39,7 +39,10 @@ interface RoutesSidebarProps {
   onSelectRoute?: (route: RouteSummary) => void;
   selectedLocationId?: string;
   selectedLocation?: LocationSearchResult | null;
-  onSelectLocation?: (location: LocationSearchResult) => void;
+  journeyStops?: LocationSearchResult[];
+  onAddStop?: (location: LocationSearchResult) => void;
+  onRemoveStop?: (id: string) => void;
+  onClearJourney?: () => void;
   userLocation?: { latitude: number; longitude: number } | null;
   hasOrigin?: boolean;
   itineraries?: PlanItinerary[] | null;
@@ -144,7 +147,10 @@ export function RoutesSidebar({
   onSelectRoute,
   selectedLocationId,
   selectedLocation,
-  onSelectLocation,
+  journeyStops = [],
+  onAddStop,
+  onRemoveStop,
+  onClearJourney,
   userLocation,
   hasOrigin = false,
   itineraries,
@@ -169,12 +175,17 @@ export function RoutesSidebar({
   const pendingActionRef = useRef<(() => void) | null>(null);
   const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
   const saved = useSavedRoutes();
+  const activeDestination = journeyStops.length
+    ? journeyStops[journeyStops.length - 1]
+    : selectedLocation ?? null;
+  const journeyStopIds = useMemo(() => new Set(journeyStops.map((stop) => stop.id)), [journeyStops]);
+  const finalStopId = activeDestination?.id ?? selectedLocationId ?? null;
 
   const { data: routes, isLoading: areRoutesLoading } = api.bus.getRoutes.useQuery();
 
   useEffect(() => {
     const previousId = previousLocationIdRef.current;
-    const currentId = selectedLocation?.id ?? null;
+    const currentId = activeDestination?.id ?? null;
 
     if (currentId && currentId !== previousId) {
       setView("itineraries");
@@ -183,7 +194,7 @@ export function RoutesSidebar({
     }
 
     previousLocationIdRef.current = currentId;
-  }, [selectedLocation, view]);
+  }, [activeDestination, view]);
 
   useEffect(() => {
     if (session.status === "authenticated" && pendingActionRef.current) {
@@ -463,13 +474,13 @@ export function RoutesSidebar({
     []
   );
 
-  const handleSelectPlace = useCallback(
+  const handleAddPlace = useCallback(
     (place: PlaceResult) => {
-      if (!onSelectLocation) return;
+      if (!onAddStop) return;
 
       const performSelection = async () => {
         if (place.location) {
-          onSelectLocation(place.location);
+          onAddStop(place.location);
           setView("itineraries");
           resetSessionToken();
           return;
@@ -477,7 +488,7 @@ export function RoutesSidebar({
 
         const location = await fetchLocationDetails(place.mapboxId);
         if (location) {
-          onSelectLocation(location);
+          onAddStop(location);
           setPlaceResults((prev) =>
             prev.map((item) => (item.mapboxId === place.mapboxId ? { ...item, location } : item))
           );
@@ -490,7 +501,7 @@ export function RoutesSidebar({
         void performSelection();
       });
     },
-    [fetchLocationDetails, onSelectLocation, resetSessionToken, setView, requireAuth]
+    [fetchLocationDetails, onAddStop, resetSessionToken, setView, requireAuth]
   );
 
   return (
@@ -527,9 +538,15 @@ export function RoutesSidebar({
                   Back to places
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-foreground">{selectedLocation?.name ?? "Suggested routes"}</div>
-                  {selectedLocation?.placeName && (
-                    <div className="truncate text-xs text-muted-foreground">{selectedLocation.placeName}</div>
+                  <div className="truncate text-sm font-semibold text-foreground">
+                    {activeDestination?.name ?? "Suggested routes"}
+                  </div>
+                  {(activeDestination?.placeName || journeyStops.length > 1) && (
+                    <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                      {journeyStops.length > 1 && <span>{journeyStops.length} stops</span>}
+                      {journeyStops.length > 1 && activeDestination?.placeName && <span>&middot;</span>}
+                      {activeDestination?.placeName && <span className="truncate">{activeDestination.placeName}</span>}
+                    </div>
                   )}
                 </div>
               </div>
@@ -663,7 +680,6 @@ export function RoutesSidebar({
                     <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
                       <ul className="space-y-2 p-2 pr-3">
                         {placesWithDistance.map((place) => {
-                          const activeLocationId = selectedLocation?.id ?? selectedLocationId;
                           const identifiedLocation = place.location;
                           const summaryContext = place.context.join(" • ");
                           const subtitle =
@@ -682,18 +698,28 @@ export function RoutesSidebar({
                               ? `${formatDistance(computedDistanceMeters)} away`
                               : undefined;
                           const distanceLabel = formattedDistance ?? "Distance unavailable";
-                          const isActive =
-                            (!!activeLocationId &&
-                              (identifiedLocation?.id === activeLocationId || place.mapboxId === activeLocationId));
+                          const isJourneyStop = identifiedLocation
+                            ? journeyStopIds.has(identifiedLocation.id)
+                            : journeyStopIds.has(place.mapboxId);
+                          const isFinalStop = Boolean(
+                            finalStopId &&
+                              ((identifiedLocation && identifiedLocation.id === finalStopId) ||
+                                place.mapboxId === finalStopId)
+                          );
+                          const highlightClass = isFinalStop
+                            ? "border-blue-500 ring-2 ring-blue-500/40 bg-blue-50"
+                            : isJourneyStop
+                              ? "border-blue-300/60 bg-blue-50/40"
+                              : "";
 
                           return (
                             <li key={place.mapboxId}>
                               <button
                                 className={`relative w-full max-w-full overflow-hidden rounded-2xl border bg-card px-4 py-4 text-left shadow-sm transition hover:shadow-md ${
-                                  isActive ? "border-blue-500 ring-2 ring-blue-500/40 bg-blue-50" : ""
+                                  highlightClass
                                 }`}
-                                aria-pressed={isActive}
-                                onClick={() => handleSelectPlace(place)}
+                                aria-pressed={isJourneyStop}
+                                onClick={() => handleAddPlace(place)}
                                 title={place.placeName}
                               >
                                 <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-3">
@@ -782,15 +808,58 @@ export function RoutesSidebar({
               </>
             ) : (
               <>
-                {!selectedLocation ? (
+                {!journeyStops.length ? (
                   <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
-                    Choose a destination to view suggested routes.
+                    Add at least one stop to build a journey.
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0">
                     <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
                       <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
                         <div className="space-y-2 p-2 pr-3">
+                          <div className="rounded-xl border border-blue-200 bg-blue-50/30 px-3 py-3">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                Journey stops
+                              </div>
+                              {onClearJourney && journeyStops.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={onClearJourney}
+                                  className="inline-flex h-6 items-center justify-center rounded-full border border-blue-200 px-2 text-[10px] font-semibold uppercase tracking-wide text-blue-700 transition hover:bg-blue-100"
+                                >
+                                  Clear all
+                                </button>
+                              )}
+                            </div>
+                            <ol className="space-y-2">
+                              {journeyStops.map((stop, index) => (
+                                <li key={stop.id} className="flex items-start gap-2">
+                                  <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+                                    {index + 1}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium text-foreground" title={stop.name}>
+                                      {stop.name}
+                                    </div>
+                                    {stop.placeName && (
+                                      <div className="truncate text-xs text-muted-foreground">{stop.placeName}</div>
+                                    )}
+                                  </div>
+                                  {onRemoveStop && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onRemoveStop(stop.id)}
+                                      className="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full border border-transparent text-muted-foreground transition hover:border-red-200 hover:text-red-600"
+                                      aria-label={`Remove stop ${stop.name}`}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
                           {planStatus !== "success" ? (
                             <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
                               {itineraryStatusMessage}
@@ -826,7 +895,8 @@ export function RoutesSidebar({
                                         } else {
                                           console.log('Saving route', rid);
                                           // Use the destination name as the nickname (save full name)
-                                          const nickname = selectedLocation?.name || selectedLocation?.placeName || undefined;
+                                          const nickname =
+                                            activeDestination?.name || activeDestination?.placeName || undefined;
                                           void saved.save(rid, nickname);
                                           // After saving, select the route for display
                                           if (onSelectRoute) {

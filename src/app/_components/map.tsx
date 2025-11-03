@@ -19,6 +19,7 @@ type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 interface MapboxMapProps {
   selectedRoute?: RouteSummary | null;
   selectedLocation?: LocationSearchResult | null;
+  journeyStops?: LocationSearchResult[] | null;
   userLocation?: { latitude: number; longitude: number } | null;
 }
 
@@ -96,7 +97,12 @@ const MODEL_ID: DataDrivenPropertyValueSpecification<string> = GET_MODEL_ID_EXPR
  * directions. The component integrates Mapbox's Directions API and 3D model layers for buses
  * while managing data fetching, state synchronization, and imperative Mapbox interactions.
  */
-export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: MapboxMapProps) {
+export function MapboxMap({
+  selectedRoute,
+  selectedLocation,
+  journeyStops: journeyStopsProp,
+  userLocation,
+}: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [modelReady, setModelReady] = useState(false);
@@ -104,6 +110,7 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
   const directionsRequestIdRef = useRef(0);
   const hasCenteredUserRef = useRef(false);
   const mapRef = useRef<MapRef | null>(null);
+  const journeyStopList = Array.isArray(journeyStopsProp) ? journeyStopsProp : [];
 
   const routeId = selectedRoute?.RouteId ?? null;
 
@@ -302,7 +309,7 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
       return;
     }
 
-    if (!selectedLocation || !userLocation) {
+    if (!userLocation || journeyStopList.length === 0) {
       setNavigationRoute(null);
       return;
     }
@@ -313,7 +320,11 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
 
     const fetchDirections = async () => {
       try {
-        const coordinates = `${userLocation.longitude},${userLocation.latitude};${selectedLocation.longitude},${selectedLocation.latitude}`;
+        const coordinateParts = [
+          `${userLocation.longitude},${userLocation.latitude}`,
+          ...journeyStopList.map((stop) => `${stop.longitude},${stop.latitude}`),
+        ];
+        const coordinates = coordinateParts.join(";");
         const url = `https://api.mapbox.com/directions/v5/${DIRECTIONS_PROFILE}/${coordinates}?alternatives=false&geometries=geojson&overview=full&steps=false&access_token=${env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}`;
         const response = await fetch(url, { signal: controller.signal });
 
@@ -365,7 +376,7 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
     return () => {
       controller.abort();
     };
-  }, [selectedRoute, selectedLocation, userLocation]);
+  }, [selectedRoute, journeyStopList, userLocation]);
 
   useEffect(() => {
     if (!mapLoaded) return;
@@ -415,6 +426,17 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
       }
     }
 
+    if (!selectedRoute && journeyStopList.length) {
+      const target = journeyStopList[journeyStopList.length - 1];
+      mapInstance.flyTo({
+        center: [target.longitude, target.latitude],
+        zoom: Math.max(mapInstance.getZoom(), 16),
+        duration: 900,
+        essential: true,
+      });
+      return;
+    }
+
     if (!selectedRoute && selectedLocation) {
       mapInstance.flyTo({
         center: [selectedLocation.longitude, selectedLocation.latitude],
@@ -423,7 +445,7 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
         essential: true,
       });
     }
-  }, [mapLoaded, selectedRoute, selectedLocation, navigationRoute, routeGeoJson]);
+  }, [mapLoaded, selectedRoute, selectedLocation, navigationRoute, routeGeoJson, journeyStopList]);
 
   const navigationLineLayer = useMemo<LayerProps>(
     () => ({
@@ -482,14 +504,43 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
           </Source>
         )}
 
-        {!selectedRoute && selectedLocation && (
-          <Marker latitude={selectedLocation.latitude} longitude={selectedLocation.longitude} anchor="bottom">
-            <div className="relative flex items-center justify-center">
-              <span className="absolute h-8 w-8 rounded-full bg-blue-500/30 blur-md" />
-              <span className="inline-block h-4 w-4 rounded-full border-2 border-white bg-blue-600 shadow-lg" />
-            </div>
-          </Marker>
-        )}
+        {!selectedRoute &&
+          (journeyStopList.length
+            ? journeyStopList.map((stop, index) => {
+                const isFinal = index === journeyStopList.length - 1;
+                return (
+                  <Marker
+                    key={`journey-stop-${stop.id}-${index}`}
+                    latitude={stop.latitude}
+                    longitude={stop.longitude}
+                    anchor="bottom"
+                  >
+                    <div className="relative flex items-center justify-center">
+                      <span
+                        className={`absolute h-8 w-8 rounded-full blur-md ${
+                          isFinal ? "bg-blue-500/30" : "bg-blue-400/20"
+                        }`}
+                      />
+                      <span
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-xs font-semibold shadow-lg ${
+                          isFinal ? "bg-blue-600 text-white" : "bg-blue-200 text-blue-700"
+                        }`}
+                      >
+                        {index + 1}
+                      </span>
+                    </div>
+                  </Marker>
+                );
+              })
+            :
+              selectedLocation && (
+                <Marker latitude={selectedLocation.latitude} longitude={selectedLocation.longitude} anchor="bottom">
+                  <div className="relative flex items-center justify-center">
+                    <span className="absolute h-8 w-8 rounded-full bg-blue-500/30 blur-md" />
+                    <span className="inline-block h-4 w-4 rounded-full border-2 border-white bg-blue-600 shadow-lg" />
+                  </div>
+                </Marker>
+              ))}
 
         {userLocation && (
           <Marker latitude={userLocation.latitude} longitude={userLocation.longitude} anchor="center">
