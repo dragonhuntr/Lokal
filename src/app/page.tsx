@@ -5,11 +5,23 @@ import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
-import { api } from "@/trpc/react";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 type Coordinates = { latitude: number; longitude: number };
 type PlanStatus = "idle" | "loading" | "success" | "error";
+
+function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const itineraries = (value as { itineraries?: unknown }).itineraries;
+  if (!Array.isArray(itineraries)) {
+    return null;
+  }
+
+  return itineraries as PlanItinerary[];
+}
 
 export default function Home() {
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
@@ -19,10 +31,6 @@ export default function Home() {
   const [planStatus, setPlanStatus] = useState<PlanStatus>("idle");
   const [planError, setPlanError] = useState<string | null>(null);
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
-
-  const { data: routes } = api.bus.getRoutes.useQuery(undefined, {
-    staleTime: 5 * 60 * 1000,
-  });
 
   const handleSelectLocation = useCallback((location: LocationSearchResult) => {
     setSelectedRoute(null);
@@ -43,7 +51,7 @@ export default function Home() {
   }, []);
 
   const handleSelectItinerary = useCallback(
-    (index: number, itinerary: PlanItinerary) => {
+    (index: number, _itinerary: PlanItinerary) => {
       setSelectedItineraryIndex(index);
       // Don't automatically select the route when an itinerary is clicked
       // Route selection should only happen via the save bookmark button or manual route selection
@@ -117,12 +125,20 @@ export default function Home() {
         });
 
         if (!response.ok) {
-          const errorPayload = await response.json().catch(() => null);
-          throw new Error(errorPayload?.error ?? `Request failed with status ${response.status}`);
+          const errorPayload = (await response.json().catch(() => null)) as unknown;
+          const errorMessage =
+            errorPayload &&
+            typeof errorPayload === "object" &&
+            "error" in errorPayload &&
+            typeof (errorPayload as { error?: unknown }).error === "string"
+              ? ((errorPayload as { error: string }).error)
+              : `Request failed with status ${response.status}`;
+          throw new Error(errorMessage);
         }
 
-        const data = (await response.json()) as { itineraries: PlanItinerary[] };
-        setPlanItineraries(data.itineraries ?? null);
+        const rawData = (await response.json()) as unknown;
+        const parsedItineraries = extractPlanItineraries(rawData);
+        setPlanItineraries(parsedItineraries);
         setPlanStatus("success");
         setPlanError(null);
         setSelectedItineraryIndex(0);

@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { env } from "@/env";
@@ -17,19 +18,19 @@ const RefreshSchema = z
   .partial()
   .optional();
 
-const extractRefreshToken = async (request: NextRequest) => {
+const extractRefreshToken = async (request: NextRequest): Promise<string | undefined> => {
   const fromCookie = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
 
   try {
-    const body = await request.json();
-    if (!body || typeof body !== "object") {
+    const rawBody = (await request.json()) as unknown;
+    if (!rawBody || typeof rawBody !== "object") {
       return fromCookie;
     }
-    const parsed = RefreshSchema.safeParse(body);
+    const parsed = RefreshSchema.safeParse(rawBody);
     if (parsed.success && parsed.data?.refreshToken) {
       return parsed.data.refreshToken;
     }
-  } catch (error) {
+  } catch {
     // ignore JSON parse errors and rely on cookie value
   }
 

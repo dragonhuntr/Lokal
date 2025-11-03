@@ -19,7 +19,7 @@ export async function GET(_request: Request, { params }: Context) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     return NextResponse.json({ user }, { status: 200 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
@@ -33,8 +33,8 @@ export async function PUT(request: Request, { params }: Context) {
     const claims = await getClaimsFromCookies();
     requireSelfOrThrow(params.id, claims);
 
-    const body = await request.json();
-    const { name } = UpdateUserSchema.parse(body);
+    const rawBody = (await request.json()) as unknown;
+    const { name } = UpdateUserSchema.parse(rawBody);
 
     const updated = await db.user.update({
       where: { id: params.id },

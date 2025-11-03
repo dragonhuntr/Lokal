@@ -39,7 +39,7 @@ export async function GET(_request: Request, { params }: Context) {
         route: s.route,
       })),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
@@ -55,8 +55,8 @@ export async function POST(request: Request, { params }: Context) {
     const claims = await getClaimsFromCookies();
     requireSelfOrThrow(id, claims);
 
-    const body = await request.json();
-    const { routeId, nickname } = SaveSchema.parse(body);
+    const rawBody = (await request.json()) as unknown;
+    const { routeId, nickname } = SaveSchema.parse(rawBody);
 
     const existing = await db.savedRoute.findFirst({ where: { userId: id, routeId } });
     if (existing) {

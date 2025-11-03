@@ -13,7 +13,7 @@ export async function DELETE(_request: Request, { params }: Context) {
 
     await db.savedRoute.deleteMany({ where: { userId: id, routeId } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
