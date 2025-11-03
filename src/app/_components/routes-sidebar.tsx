@@ -182,6 +182,19 @@ export function RoutesSidebar({
   const finalStopId = activeDestination?.id ?? selectedLocationId ?? null;
 
   const { data: routes, isLoading: areRoutesLoading } = api.bus.getRoutes.useQuery();
+  const { data: allVehicles } = api.bus.getAllVehicles.useQuery(undefined, {
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  const vehiclesByRoute = useMemo(() => {
+    if (!allVehicles) return new Map<number, number>();
+    const map = new Map<number, number>();
+    for (const vehicle of allVehicles) {
+      const count = map.get(vehicle.RouteId) ?? 0;
+      map.set(vehicle.RouteId, count + 1);
+    }
+    return map;
+  }, [allVehicles]);
 
   useEffect(() => {
     const previousId = previousLocationIdRef.current;
@@ -615,6 +628,10 @@ export function RoutesSidebar({
                           const color = `#${(route.Color ?? "").trim()}`;
                           const subtitle = route.Description && route.Description.length > 0 ? route.Description : "";
                           const isActive = route.RouteId === selectedRouteId;
+                          const vehicleCount = vehiclesByRoute.get(route.RouteId) ?? 0;
+                          const statusText = vehicleCount > 0
+                            ? `${vehicleCount} bus${vehicleCount === 1 ? "" : "es"} active`
+                            : "No active buses";
 
                           return (
                             <li key={route.RouteId}>
@@ -634,7 +651,7 @@ export function RoutesSidebar({
                                     <div className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
                                       {route.LongName || route.ShortName}
                                     </div>
-                                    <div className="mt-1 text-xs text-muted-foreground">On Time</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{statusText}</div>
                                   </div>
                                   <div className="text-right">
                                     <span
