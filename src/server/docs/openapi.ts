@@ -1143,7 +1143,7 @@ export const openApiDocument: OpenAPIV3.Document = {
           },
           endStopId: {
             type: "string",
-            description: "Identifier of the alighting stop for transit legs.",
+            description: "Identifier of the getting off stop for transit legs.",
           },
         },
       },

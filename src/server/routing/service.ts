@@ -7,6 +7,9 @@ import { db } from "@/server/db";
 export interface Coordinate {
   latitude: number;
   longitude: number;
+  stopId?: string;
+  stopName?: string;
+  sequence?: number;
 }
 
 export interface PlanRequest {
@@ -37,6 +40,8 @@ export interface PlanLeg {
   endStopId?: string;
   endStopName?: string;
   stopCount?: number;
+  /** Array of coordinates representing the path (for bus routes, includes all intermediate stops) */
+  path?: Coordinate[];
 }
 
 export interface PlanItinerary {
@@ -130,6 +135,8 @@ interface Candidate {
   route: PrismaRoute & { stops: Stop[] };
   startStop: Stop;
   endStop: Stop;
+  startStopIndex: number;
+  endStopIndex: number;
   startDistanceMeters: number;
   endDistanceMeters: number;
   busDistanceMeters: number;
@@ -137,7 +144,7 @@ interface Candidate {
 }
 
 function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordinate): PlanLeg[] {
-  const { route, startStop, endStop, startDistanceMeters, endDistanceMeters, busDistanceMeters, stopCount } =
+  const { route, startStop, endStop, startStopIndex, endStopIndex, startDistanceMeters, endDistanceMeters, busDistanceMeters, stopCount } =
     candidate;
 
   const walkingToStopMinutes = walkingTimeMinutes(startDistanceMeters);
@@ -150,7 +157,23 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     durationMinutes: walkingToStopMinutes,
     start: origin,
     end: { latitude: startStop.latitude, longitude: startStop.longitude },
+    path: [origin, { latitude: startStop.latitude, longitude: startStop.longitude }],
   };
+
+  // Build path for bus leg including all intermediate stops with metadata
+  const busPath: Coordinate[] = [];
+  for (let i = startStopIndex; i <= endStopIndex; i++) {
+    const stop = route.stops[i];
+    if (stop) {
+      busPath.push({
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        stopId: stop.id,
+        stopName: stop.name,
+        sequence: stop.sequence,
+      });
+    }
+  }
 
   const busLeg: PlanLeg = {
     type: "bus",
@@ -166,6 +189,7 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     endStopId: endStop.id,
     endStopName: endStop.name,
     stopCount,
+    path: busPath,
   };
 
   const walkLegEnd: PlanLeg = {
@@ -174,6 +198,7 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     durationMinutes: walkingFromStopMinutes,
     start: { latitude: endStop.latitude, longitude: endStop.longitude },
     end: destination,
+    path: [{ latitude: endStop.latitude, longitude: endStop.longitude }, destination],
   };
 
   return [walkLegStart, busLeg, walkLegEnd];
@@ -206,6 +231,7 @@ function buildDirectWalk(origin: Coordinate, destination: Coordinate): PlanItine
     durationMinutes,
     start: origin,
     end: destination,
+    path: [origin, destination],
   };
 
   // Generate a unique route ID for walking routes based on coordinates
@@ -269,6 +295,8 @@ function findCandidates(
           route,
           startStop: start.stop,
           endStop: end.stop,
+          startStopIndex: start.index,
+          endStopIndex: end.index,
           startDistanceMeters: start.distance,
           endDistanceMeters: end.distance,
           busDistanceMeters: busDistance,
@@ -338,7 +366,10 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
   const network = await fetchNetwork();
 
   if (normalizedDestinations.length === 1) {
-    const [finalDestination] = normalizedDestinations;
+    const finalDestination = normalizedDestinations[0];
+    if (!finalDestination) {
+      throw new Error("Destination is required");
+    }
     return {
       generatedAt: new Date().toISOString(),
       itineraries: planSegmentItineraries(

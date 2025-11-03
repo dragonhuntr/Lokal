@@ -896,7 +896,7 @@ export function RoutesSidebar({
                                       e.stopPropagation();
                                       e.preventDefault();
                                       const rid = itinerary.routeId;
-                                      
+
                                       console.log('Bookmark clicked!', { rid, itinerary, hasRouteId: !!rid });
 
                                       if (!rid) {
@@ -956,15 +956,30 @@ export function RoutesSidebar({
 
                                   <div className="mt-2 space-y-1.5">
                                     {itinerary.legs.map((leg, legIndex, legs) => (
-                                      <div key={legIndex} className="flex items-start gap-2 text-xs text-muted-foreground">
-                                        <span className="mt-0.5">
+                                      <div key={legIndex} className="flex items-start gap-2 text-xs">
+                                        <span className="mt-0.5 flex-shrink-0">
                                           {leg.type === "walk" ? (
-                                            <Footprints className="h-3.5 w-3.5 opacity-60" />
+                                            <Footprints className="h-3.5 w-3.5 text-blue-600" />
                                           ) : (
-                                            <BusFront className="h-3.5 w-3.5 opacity-60" />
+                                            <BusFront className="h-3.5 w-3.5 text-orange-600" />
                                           )}
                                         </span>
-                                        <span>{renderLegDescription(leg, legIndex, legs)}</span>
+                                        <div className="flex-1 min-w-0">
+                                          <span className="text-muted-foreground">{renderLegDescription(leg, legIndex, legs)}</span>
+                                          {isActive && (
+                                            <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground/80">
+                                              {leg.type === "bus" && leg.routeName && (
+                                                <div>Route: {leg.routeName}</div>
+                                              )}
+                                              {leg.startStopName && (
+                                                <div>From: {leg.startStopName}</div>
+                                              )}
+                                              {leg.endStopName && (
+                                                <div>To: {leg.endStopName}</div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
                                     ))}
                                   </div>

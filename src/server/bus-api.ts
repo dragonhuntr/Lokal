@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 import { db } from "@/server/db";
+import { generateFakeBuses, isDevMode } from "@/server/dev-bus-data";
+
+// Log dev mode status on module load
+if (isDevMode()) {
+  console.log("[DEV MODE] ✅ Fake buses enabled - NODE_ENV:", process.env.NODE_ENV);
+} else {
+  console.log("[PROD MODE] Using real bus data - NODE_ENV:", process.env.NODE_ENV);
+}
 
 export interface RouteCoordinate {
   longitude: number;
@@ -271,7 +279,7 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
   // Fetch from Availtec API for complete route details including vehicles
   try {
     const response = await fetch(
-      `https://emta.availtec.com/InfoPoint/rest/Routes/Get/${routeId}`,
+      `https://emta.availtec.com/InfoPoint/rest/RouteDetails/Get/${routeId}`,
       { headers: { Accept: 'application/json' }, cache: 'no-store' }
     );
 
@@ -280,6 +288,18 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
     }
 
     const data = (await response.json()) as RouteDetails;
+
+    // In dev mode, replace with fake buses for testing
+    if (isDevMode()) {
+      console.log(`[DEV MODE] fetchRouteDetails - Route ${routeId}: ${data.Stops?.length ?? 0} stops, ${data.Vehicles?.length ?? 0} real buses`);
+      data.Vehicles = generateFakeBuses({
+        routeId,
+        stops: data.Stops,
+        color: data.Color,
+      });
+      console.log(`[DEV MODE] Generated ${data.Vehicles.length} fake buses for route ${routeId}`);
+    }
+
     return data;
   } catch (error) {
     console.error(`Error fetching route details from Availtec for route ${routeId}:`, error);
@@ -309,6 +329,14 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
         StopRecordId: stop.sequence,
       }));
 
+      // In dev mode, generate fake buses for testing
+      const vehicles = isDevMode()
+        ? generateFakeBuses({
+            routeId,
+            stops,
+          })
+        : ([] as RouteDetails["Vehicles"]);
+
       const result: RouteDetails = {
         Color: "",
         Directions: [] as RouteDetails["Directions"],
@@ -319,7 +347,7 @@ export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> 
         ShortName: route.number,
         RouteTraceFilename: "",
         Stops: stops,
-        Vehicles: [] as RouteDetails["Vehicles"],
+        Vehicles: vehicles,
       };
 
       return result;
@@ -557,6 +585,9 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
 let stopsCache: Stop[] = [];
 let lastStopsFetchTime = 0;
 const STOPS_CACHE_LIFETIME = 5 * 60 * 1000; //can decrease this
+
+// Cache for route-to-stops mapping (built from stop departures)
+let routeStopsMap: Map<number, Stop[]> = new Map();
 
 export const fetchAllStops = async (): Promise<Stop[]> => {
   // if cache is fresh, use it

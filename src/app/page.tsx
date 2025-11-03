@@ -87,10 +87,10 @@ export default function Home() {
   }, []);
 
   const handleSelectItinerary = useCallback(
-    (index: number, _itinerary: PlanItinerary) => {
+    (index: number, itinerary: PlanItinerary) => {
       setSelectedItineraryIndex(index);
-      // Don't automatically select the route when an itinerary is clicked
-      // Route selection should only happen via the save bookmark button or manual route selection
+      // Clear route selection when selecting an itinerary to show the itinerary visualization
+      setSelectedRoute(null);
     },
     []
   );
@@ -222,6 +222,7 @@ export default function Home() {
         selectedLocation={activeDestination}
         journeyStops={journeyStops}
         userLocation={userLocation}
+        selectedItinerary={planItineraries?.[selectedItineraryIndex] ?? null}
       />
     </main>
   );
