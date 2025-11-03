@@ -8,13 +8,19 @@ const coordinateSchema = z.object({
   longitude: z.number().refine((value) => Math.abs(value) <= 180, "Longitude must be between -180 and 180"),
 });
 
-const requestSchema = z.object({
-  origin: coordinateSchema,
-  destination: coordinateSchema,
-  departureTime: z.string().datetime().optional(),
-  maxWalkingDistanceMeters: z.number().positive().optional(),
-  limit: z.number().int().positive().optional(),
-});
+const requestSchema = z
+  .object({
+    origin: coordinateSchema,
+    destination: coordinateSchema.optional(),
+    destinations: z.array(coordinateSchema).min(1).optional(),
+    departureTime: z.string().datetime().optional(),
+    maxWalkingDistanceMeters: z.number().positive().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .refine((value) => Boolean(value.destination) || Boolean(value.destinations?.length), {
+    message: "At least one destination is required",
+    path: ["destinations"],
+  });
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +29,7 @@ export async function POST(request: Request) {
 
     const response = await planItineraries({
       origin: parsed.origin,
-      destination: parsed.destination,
+      destinations: parsed.destinations ?? (parsed.destination ? [parsed.destination] : undefined),
       maxWalkingDistanceMeters: parsed.maxWalkingDistanceMeters,
       limit: parsed.limit,
       departureTime: parsed.departureTime ? new Date(parsed.departureTime) : undefined,

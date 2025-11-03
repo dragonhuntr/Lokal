@@ -26,23 +26,59 @@ function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
 export default function Home() {
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<RouteSummary | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<LocationSearchResult | null>(null);
+  const [journeyStops, setJourneyStops] = useState<LocationSearchResult[]>([]);
   const [planItineraries, setPlanItineraries] = useState<PlanItinerary[] | null>(null);
   const [planStatus, setPlanStatus] = useState<PlanStatus>("idle");
   const [planError, setPlanError] = useState<string | null>(null);
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
 
-  const handleSelectLocation = useCallback((location: LocationSearchResult) => {
+  const activeDestination = journeyStops.length ? journeyStops[journeyStops.length - 1] : null;
+
+  const handleAddStop = useCallback((location: LocationSearchResult) => {
     setSelectedRoute(null);
-    setSelectedLocation(location);
+    setJourneyStops((previous) => {
+      const withoutDuplicate = previous.filter((stop) => stop.id !== location.id);
+      return [...withoutDuplicate, location];
+    });
     setPlanItineraries(null);
     setPlanStatus("loading");
     setPlanError(null);
     setSelectedItineraryIndex(0);
   }, []);
 
+  const handleRemoveStop = useCallback((id: string) => {
+    setJourneyStops((previous) => {
+      const next = previous.filter((stop) => stop.id !== id);
+      if (next.length === previous.length) {
+        return previous;
+      }
+
+      if (!next.length) {
+        setPlanStatus("idle");
+        setPlanItineraries(null);
+        setPlanError(null);
+        setSelectedItineraryIndex(0);
+      } else {
+        setPlanItineraries(null);
+        setPlanStatus("loading");
+        setPlanError(null);
+        setSelectedItineraryIndex(0);
+      }
+
+      return next;
+    });
+  }, []);
+
+  const handleClearJourney = useCallback(() => {
+    setJourneyStops([]);
+    setPlanItineraries(null);
+    setPlanStatus("idle");
+    setPlanError(null);
+    setSelectedItineraryIndex(0);
+  }, []);
+
   const handleSelectRoute = useCallback((route: RouteSummary) => {
-    setSelectedLocation(null);
+    setJourneyStops([]);
     setPlanItineraries(null);
     setPlanStatus("idle");
     setPlanError(null);
@@ -88,7 +124,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!selectedLocation) {
+    if (!journeyStops.length) {
       setPlanStatus("idle");
       setPlanItineraries(null);
       setPlanError(null);
@@ -97,7 +133,8 @@ export default function Home() {
     }
 
     if (!userLocation) {
-      // Keep status as loading to indicate we are waiting for location
+      setPlanStatus("loading");
+      setPlanError(null);
       return;
     }
 
@@ -115,10 +152,10 @@ export default function Home() {
           },
           body: JSON.stringify({
             origin: userLocation,
-            destination: {
-              latitude: selectedLocation.latitude,
-              longitude: selectedLocation.longitude,
-            },
+            destinations: journeyStops.map((stop) => ({
+              latitude: stop.latitude,
+              longitude: stop.longitude,
+            })),
             limit: 3,
           }),
           signal: controller.signal,
@@ -156,7 +193,7 @@ export default function Home() {
     return () => {
       controller.abort();
     };
-  }, [selectedLocation, userLocation]);
+  }, [journeyStops, userLocation]);
 
   // Removed automatic route selection when itinerary changes
   // Routes should only be selected via the save bookmark button or manual route selection
@@ -166,9 +203,12 @@ export default function Home() {
       <RoutesSidebar
         selectedRouteId={selectedRoute?.RouteId}
         onSelectRoute={handleSelectRoute}
-        selectedLocationId={selectedLocation?.id}
-        selectedLocation={selectedLocation}
-        onSelectLocation={handleSelectLocation}
+        selectedLocationId={activeDestination?.id}
+        selectedLocation={activeDestination}
+        journeyStops={journeyStops}
+        onAddStop={handleAddStop}
+        onRemoveStop={handleRemoveStop}
+        onClearJourney={handleClearJourney}
         userLocation={userLocation}
         itineraries={planItineraries}
         planStatus={planStatus}
@@ -177,7 +217,12 @@ export default function Home() {
         selectedItineraryIndex={selectedItineraryIndex}
         onSelectItinerary={handleSelectItinerary}
       />
-      <MapboxMap selectedRoute={selectedRoute} selectedLocation={selectedLocation} userLocation={userLocation} />
+      <MapboxMap
+        selectedRoute={selectedRoute}
+        selectedLocation={activeDestination}
+        journeyStops={journeyStops}
+        userLocation={userLocation}
+      />
     </main>
   );
 }
