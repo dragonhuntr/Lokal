@@ -13,6 +13,8 @@ import { env } from "@/env";
 import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import type { LocationSearchResult } from "./routes-sidebar";
+import { BusInfoPopup } from "./bus-info-popup";
+import type { RouteDetails } from "@/server/bus-api";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 
@@ -107,25 +109,28 @@ export function MapboxMap({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [modelReady, setModelReady] = useState(false);
   const [navigationRoute, setNavigationRoute] = useState<NavigationRouteGeoJSON | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<RouteDetails["Vehicles"][number] | null>(
+    null
+  );
   const directionsRequestIdRef = useRef(0);
   const hasCenteredUserRef = useRef(false);
   const mapRef = useRef<MapRef | null>(null);
   const journeyStopList = Array.isArray(journeyStopsProp) ? journeyStopsProp : [];
 
-  const routeId = selectedRoute?.RouteId ?? null;
+  const routeId = selectedRoute?.RouteId;
 
   const { data: routeShape } = api.bus.getRouteKML.useQuery(
-    { routeId: routeId ?? -1 },
+    { routeId: routeId ?? 0 },
     {
-      enabled: routeId !== null,
+      enabled: routeId !== undefined && routeId !== null,
       staleTime: 5 * 60 * 1000,
     }
   );
 
   const { data: routeDetails } = api.bus.getRouteDetails.useQuery(
-    { routeId: routeId ?? -1 },
+    { routeId: routeId ?? 0 },
     {
-      enabled: routeId !== null,
+      enabled: routeId !== undefined && routeId !== null,
       refetchInterval: 10_000,
       select: (data) => ({
         ...data,
@@ -303,6 +308,57 @@ export function MapboxMap({
     };
   }, [ensureBusModelLoaded, mapLoaded, selectedRoute]);
 
+  const handleMapClick = useCallback(
+    (event: mapboxgl.MapLayerMouseEvent) => {
+      const mapInstance = mapRef.current?.getMap();
+      if (!mapInstance) return;
+
+      // Check if we clicked on the bus layer
+      const features = mapInstance.queryRenderedFeatures(event.point, {
+        layers: [BUS_LAYER_ID],
+      });
+
+      if (features && features.length > 0) {
+        const feature = features[0];
+        const vehicleId = feature?.properties?.vehicleId as number | undefined;
+
+        if (vehicleId && routeDetails?.Vehicles) {
+          const vehicle = routeDetails.Vehicles.find((v) => v.VehicleId === vehicleId);
+          if (vehicle) {
+            setSelectedVehicle(vehicle);
+          }
+        }
+      }
+    },
+    [routeDetails?.Vehicles]
+  );
+
+  useEffect(() => {
+    const mapInstance = mapRef.current?.getMap();
+    if (!mapInstance || !mapLoaded || !modelReady) return;
+
+    mapInstance.on("click", BUS_LAYER_ID, handleMapClick);
+
+    // Change cursor on hover
+    mapInstance.on("mouseenter", BUS_LAYER_ID, () => {
+      mapInstance.getCanvas().style.cursor = "pointer";
+    });
+
+    mapInstance.on("mouseleave", BUS_LAYER_ID, () => {
+      mapInstance.getCanvas().style.cursor = "";
+    });
+
+    return () => {
+      mapInstance.off("click", BUS_LAYER_ID, handleMapClick);
+      mapInstance.off("mouseenter", BUS_LAYER_ID, () => {
+        mapInstance.getCanvas().style.cursor = "pointer";
+      });
+      mapInstance.off("mouseleave", BUS_LAYER_ID, () => {
+        mapInstance.getCanvas().style.cursor = "";
+      });
+    };
+  }, [mapLoaded, modelReady, handleMapClick]);
+
   useEffect(() => {
     if (selectedRoute) {
       setNavigationRoute(null);
@@ -467,7 +523,11 @@ export function MapboxMap({
   );
 
   return (
-    <div className="h-screen w-full">
+    <div className="relative h-screen w-full">
+      {selectedVehicle && (
+        <BusInfoPopup vehicle={selectedVehicle} onClose={() => setSelectedVehicle(null)} />
+      )}
+
       <Map
         ref={mapRef}
         {...viewState}
@@ -493,8 +553,17 @@ export function MapboxMap({
         {selectedRoute &&
           !modelReady &&
           routeDetails?.Vehicles?.map((vehicle) => (
-            <Marker key={vehicle.VehicleId} latitude={vehicle.Latitude} longitude={vehicle.Longitude} anchor="center">
-              <div className="h-3 w-3 rounded-full border border-white bg-blue-500 shadow" />
+            <Marker
+              key={vehicle.VehicleId}
+              latitude={vehicle.Latitude}
+              longitude={vehicle.Longitude}
+              anchor="center"
+            >
+              <button
+                onClick={() => setSelectedVehicle(vehicle)}
+                className="h-3 w-3 cursor-pointer rounded-full border border-white bg-blue-500 shadow transition-transform hover:scale-150"
+                aria-label={`View info for ${vehicle.Name}`}
+              />
             </Marker>
           ))}
 

@@ -268,43 +268,65 @@ export const fetchRoutes = async (): Promise<Route[]> => {
 };
 
 export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> => {
-  const route = await db.route.findUnique({
-    where: { id: `route-${routeId}` },
-    include: {
-      stops: {
-        orderBy: { sequence: "asc" },
-      },
-    },
-  });
+  // Fetch from Availtec API for complete route details including vehicles
+  try {
+    const response = await fetch(
+      `https://emta.availtec.com/InfoPoint/rest/Routes/Get/${routeId}`,
+      { headers: { Accept: 'application/json' }, cache: 'no-store' }
+    );
 
-  if (!route) {
-    throw new Error(`Route ${routeId} not found in database`);
+    if (!response.ok) {
+      throw new Error(`Availtec API request failed with status ${response.status}`);
+    }
+
+    const data = (await response.json()) as RouteDetails;
+    return data;
+  } catch (error) {
+    console.error(`Error fetching route details from Availtec for route ${routeId}:`, error);
+
+    // Fallback to database if Availtec fails
+    try {
+      const route = await db.route.findUnique({
+        where: { id: `route-${routeId}` },
+        include: {
+          stops: {
+            orderBy: { sequence: "asc" },
+          },
+        },
+      });
+
+      if (!route) {
+        throw new Error(`Route ${routeId} not found in database or Availtec API`);
+      }
+
+      const stops: RouteDetails["Stops"] = route.stops.map((stop) => ({
+        Description: stop.name,
+        IsTimePoint: true,
+        Latitude: stop.latitude,
+        Longitude: stop.longitude,
+        Name: stop.name,
+        StopId: stop.sequence,
+        StopRecordId: stop.sequence,
+      }));
+
+      const result: RouteDetails = {
+        Color: "",
+        Directions: [] as RouteDetails["Directions"],
+        GoogleDescription: "",
+        LongName: route.name,
+        RouteAbbreviation: route.number,
+        RouteId: routeId,
+        ShortName: route.number,
+        RouteTraceFilename: "",
+        Stops: stops,
+        Vehicles: [] as RouteDetails["Vehicles"],
+      };
+
+      return result;
+    } catch (dbError) {
+      throw new Error(`Failed to fetch route ${routeId} from both Availtec API and database: ${String(dbError)}`);
+    }
   }
-
-  const stops: RouteDetails["Stops"] = route.stops.map((stop) => ({
-    Description: stop.name,
-    IsTimePoint: true,
-    Latitude: stop.latitude,
-    Longitude: stop.longitude,
-    Name: stop.name,
-    StopId: stop.sequence,
-    StopRecordId: stop.sequence,
-  }));
-
-  const result: RouteDetails = {
-    Color: "",
-    Directions: [] as RouteDetails["Directions"],
-    GoogleDescription: "",
-    LongName: route.name,
-    RouteAbbreviation: route.number,
-    RouteId: routeId,
-    ShortName: route.number,
-    RouteTraceFilename: "",
-    Stops: stops,
-    Vehicles: [] as RouteDetails["Vehicles"],
-  };
-
-  return result;
 };
 
 // cache for stop departures
@@ -614,40 +636,52 @@ export const formatLastUpdated = (lastUpdatedStr: string): string => {
   }
 };
 
-export const getOccupancyLabel = (status: string): string => {
-  switch (status.toLowerCase()) {
-    case "empty":
-      return "Empty";
-    case "many seats available":
-      return "Many Seats";
-    case "few seats available":
-      return "Few Seats";
-    case "standing room only":
-      return "Standing Room";
-    case "crushed standing room only":
-      return "Full";
-    case "not accepting passengers":
-      return "Full";
-    default:
-      return status;
+// cache for all vehicles
+let vehiclesCache: RouteDetails["Vehicles"] = [];
+let lastVehiclesFetchTime = 0;
+const VEHICLES_CACHE_LIFETIME = 10000; // 10 seconds
+
+export const fetchAllVehicles = async (): Promise<RouteDetails["Vehicles"]> => {
+  // if cache is fresh, use it
+  if (Date.now() - lastVehiclesFetchTime < VEHICLES_CACHE_LIFETIME && vehiclesCache.length > 0) {
+    return vehiclesCache;
+  }
+
+  try {
+    const routes = await fetchRoutes();
+    const allVehicles: RouteDetails["Vehicles"] = [];
+
+    // Fetch vehicle data for all visible routes
+    for (const route of routes) {
+      try {
+        const routeDetails = await fetchRouteDetails(route.RouteId);
+        if (routeDetails.Vehicles && routeDetails.Vehicles.length > 0) {
+          // Filter out invalid coordinates
+          const validVehicles = routeDetails.Vehicles.filter(
+            (vehicle) =>
+              Number.isFinite(vehicle.Latitude) &&
+              Number.isFinite(vehicle.Longitude) &&
+              (vehicle.Latitude !== 0 || vehicle.Longitude !== 0)
+          );
+          allVehicles.push(...validVehicles);
+        }
+      } catch (error) {
+        console.error(`Error fetching vehicles for route ${route.RouteId}:`, error);
+      }
+    }
+
+    vehiclesCache = allVehicles;
+    lastVehiclesFetchTime = Date.now();
+    return allVehicles;
+  } catch (error) {
+    console.error("Error fetching all vehicles:", error);
+    // if error occurs, return cached data if available, otherwise empty array
+    if (vehiclesCache.length > 0) {
+      return vehiclesCache;
+    }
+    return [];
   }
 };
 
-export const getOccupancyColor = (status: string): string => {
-  switch (status.toLowerCase()) {
-    case "empty":
-      return "bg-green-100 text-green-800";
-    case "many seats available":
-      return "bg-green-100 text-green-800";
-    case "few seats available":
-      return "bg-yellow-100 text-yellow-800";
-    case "standing room only":
-      return "bg-orange-100 text-orange-800";
-    case "crushed standing room only":
-      return "bg-red-100 text-red-800";
-    case "not accepting passengers":
-      return "bg-red-100 text-red-800";
-    default:
-      return "bg-gray-100 text-gray-800";
-  }
-};
+// Re-export utility functions for backward compatibility
+export { getOccupancyLabel, getOccupancyColor } from "@/lib/bus-utils";

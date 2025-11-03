@@ -517,7 +517,7 @@ export function RoutesSidebar({
           </button>
         </Dialog.Trigger>
         <Dialog.Portal>
-          <Dialog.Content className="pointer-events-auto fixed inset-y-4 left-4 z-50 flex w-[340px] flex-col overflow-hidden rounded-lg border bg-background p-3 shadow-xl">
+          <Dialog.Content className="pointer-events-auto fixed inset-y-4 left-4 z-50 flex min-w-[340px] max-w-[600px] flex-col overflow-hidden rounded-lg border bg-background p-3 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
               <Dialog.Title className="text-base font-semibold">Explore Lokal</Dialog.Title>
               <Dialog.Close asChild>

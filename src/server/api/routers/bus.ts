@@ -6,6 +6,7 @@ import {
   fetchStopDepartures,
   fetchAllStops,
   fetchRouteKML,
+  fetchAllVehicles,
 } from "@/server/bus-api";
 
 export const busRouter = createTRPCRouter({
@@ -44,5 +45,11 @@ export const busRouter = createTRPCRouter({
   getAllStops: publicProcedure
     .query(async () => {
       return await fetchAllStops();
+    }),
+
+  // Get all vehicles from all routes
+  getAllVehicles: publicProcedure
+    .query(async () => {
+      return await fetchAllVehicles();
     }),
 });
