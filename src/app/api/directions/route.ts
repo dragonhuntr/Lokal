@@ -18,7 +18,7 @@ const requestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const json = await request.json();
+    const json = (await request.json()) as unknown;
     const parsed = requestSchema.parse(json);
 
     const response = await planItineraries({

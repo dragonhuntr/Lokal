@@ -146,13 +146,13 @@ export const getClaimsFromCookies = async (): Promise<JwtClaims | null> => {
     const token = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
     if (!token) return null;
     return verifyJwt(token, "access");
-  } catch (_err) {
+  } catch {
     return null;
   }
 };
 
 export const requireSelfOrThrow = (userId: string, claims: JwtClaims | null) => {
-  if (!claims || claims.sub !== userId) {
+  if (claims?.sub !== userId) {
     throw new Error("Unauthorized");
   }
 };

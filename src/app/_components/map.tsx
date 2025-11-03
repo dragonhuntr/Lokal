@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Marker, Source, type LayerProps, type MapRef } from "react-map-gl/mapbox";
+import type {
+  ColorSpecification,
+  DataDrivenPropertyValueSpecification,
+  ExpressionSpecification,
+} from "mapbox-gl";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { env } from "@/env";
@@ -63,10 +68,34 @@ const BUS_LAYER_ID = "bus-model-layer";
 const BUS_MODEL_ID = "bus-3d-model";
 const BUS_MODEL_SCALE: [number, number, number] = [18, 18, 18];
 
+const GET_MODEL_ID_EXPRESSION = ["get", "modelId"] as const satisfies ExpressionSpecification;
+const GET_MODEL_SCALE_EXPRESSION = ["get", "scale"] as const satisfies ExpressionSpecification;
+const GET_MODEL_ROTATION_EXPRESSION = ["get", "rotation"] as const satisfies ExpressionSpecification;
+const GET_MODEL_TRANSLATION_EXPRESSION = ["get", "translation"] as const satisfies ExpressionSpecification;
+
 const NAVIGATION_SOURCE_ID = "navigation-route";
 const NAVIGATION_LINE_LAYER_ID = "navigation-route-line";
 const DIRECTIONS_PROFILE = "mapbox/walking";
 
+function buildModelColorExpression(
+  fallback: string,
+): DataDrivenPropertyValueSpecification<ColorSpecification> {
+  return ["coalesce", ["get", "color"], fallback] as ExpressionSpecification;
+}
+
+type ModelVector = [number, number, number];
+
+const MODEL_SCALE: DataDrivenPropertyValueSpecification<ModelVector> = GET_MODEL_SCALE_EXPRESSION;
+const MODEL_ROTATION: DataDrivenPropertyValueSpecification<ModelVector> = GET_MODEL_ROTATION_EXPRESSION;
+const MODEL_TRANSLATION: DataDrivenPropertyValueSpecification<ModelVector> =
+  GET_MODEL_TRANSLATION_EXPRESSION;
+const MODEL_ID: DataDrivenPropertyValueSpecification<string> = GET_MODEL_ID_EXPRESSION;
+
+/**
+ * Interactive Mapbox map that renders bus routes, the user's location, and dynamic navigation
+ * directions. The component integrates Mapbox's Directions API and 3D model layers for buses
+ * while managing data fetching, state synchronization, and imperative Mapbox interactions.
+ */
 export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -210,25 +239,26 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
     [routeColor]
   );
 
-  const busModelLayer: LayerProps = useMemo(
-    () => ({
-      id: BUS_LAYER_ID,
-      type: "model",
-      source: BUS_SOURCE_ID,
-      layout: {
-        "model-id": ["get", "modelId"] as any,
-      },
-      paint: {
-        "model-scale": ["get", "scale"] as any,
-        "model-rotation": ["get", "rotation"] as any,
-        "model-translation": ["get", "translation"] as any,
-        "model-emissive-strength": 0.75,
-        "model-color": ["coalesce", ["get", "color"], routeColor] as any,
-        "model-type": "common-3d",
-        "model-cast-shadows": true,
-        "model-receive-shadows": true,
-      } as any,
-    }),
+  const busModelLayer = useMemo(
+    () =>
+      ({
+        id: BUS_LAYER_ID,
+        type: "model",
+        source: BUS_SOURCE_ID,
+        layout: {
+          "model-id": MODEL_ID,
+        },
+        paint: {
+          "model-scale": MODEL_SCALE,
+          "model-rotation": MODEL_ROTATION,
+          "model-translation": MODEL_TRANSLATION,
+          "model-emissive-strength": 0.75,
+          "model-color": buildModelColorExpression(routeColor),
+          "model-type": "common-3d",
+          "model-cast-shadows": true,
+          "model-receive-shadows": true,
+        },
+      }) satisfies LayerProps,
     [routeColor]
   );
 
@@ -330,7 +360,7 @@ export function MapboxMap({ selectedRoute, selectedLocation, userLocation }: Map
       }
     };
 
-    fetchDirections();
+    void fetchDirections();
 
     return () => {
       controller.abort();

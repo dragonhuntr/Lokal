@@ -15,8 +15,8 @@ export async function PUT(request: Request, { params }: Context) {
     const claims = await getClaimsFromCookies();
     requireSelfOrThrow(params.id, claims);
 
-    const body = await request.json();
-    const { notificationsEnabled } = PreferencesSchema.parse(body);
+    const rawBody = (await request.json()) as unknown;
+    const { notificationsEnabled } = PreferencesSchema.parse(rawBody);
 
     const updated = await db.user.update({
       where: { id: params.id },

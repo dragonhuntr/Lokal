@@ -19,8 +19,8 @@ const LoginSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { email, password } = LoginSchema.parse(body);
+    const rawBody = (await request.json()) as unknown;
+    const { email, password } = LoginSchema.parse(rawBody);
 
     const user = await db.user.findUnique({ where: { email } });
     if (!user) {

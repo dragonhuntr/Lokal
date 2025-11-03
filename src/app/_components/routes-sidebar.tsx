@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { Menu, X, Search, MapPin, Bus, Footprints, BusFront, ArrowLeft, Bookmark } from "lucide-react";
-import { env } from "@/env";
-import { api } from "@/trpc/react";
-import { useSession } from "@/trpc/session";
+import { ArrowLeft, Bookmark, Bus, BusFront, Footprints, MapPin, Menu, Search, X } from "lucide-react";
+
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
+import { env } from "@/env";
+import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
+import { useSession } from "@/trpc/session";
 import { useSavedRoutes } from "@/trpc/saved-routes";
 import type { PlanItinerary } from "@/server/routing/service";
 
@@ -62,22 +63,31 @@ type SuggestionContextInput =
   | null
   | undefined;
 
-function extractContextNames(context: SuggestionContextInput): string[] {
+const isContextEntry = (value: unknown): value is ContextEntry =>
+  value === null || value === undefined || typeof value === "object";
+
+function extractContextNames(context: unknown): string[] {
   if (!context) return [];
 
   const entries: ContextEntry[] = [];
 
   if (Array.isArray(context)) {
-    entries.push(...context);
-  } else {
-    const values = Object.values(
-      context as Record<string, ContextEntry | ContextEntry[] | null | undefined>
-    );
+    for (const entry of context) {
+      if (isContextEntry(entry)) {
+        entries.push(entry);
+      }
+    }
+  } else if (typeof context === "object") {
+    const values = Object.values(context as Record<string, unknown>);
     for (const value of values) {
       if (!value) continue;
       if (Array.isArray(value)) {
-        entries.push(...value);
-      } else {
+        for (const item of value) {
+          if (isContextEntry(item)) {
+            entries.push(item);
+          }
+        }
+      } else if (isContextEntry(value)) {
         entries.push(value);
       }
     }
@@ -125,6 +135,10 @@ function formatDistance(distanceMeters: number) {
   return `${kilometres.toFixed(decimals)} km`;
 }
 
+/**
+ * Sidebar that orchestrates route discovery, saved routes, and location searches while
+ * coordinating with authentication-aware actions and multiple asynchronous data sources.
+ */
 export function RoutesSidebar({
   selectedRouteId,
   onSelectRoute,
@@ -218,82 +232,95 @@ export function RoutesSidebar({
     requestIdRef.current += 1;
     const requestId = requestIdRef.current;
 
-    const timeoutId = window.setTimeout(async () => {
+    const timeoutId = window.setTimeout(() => {
       setIsPlacesLoading(true);
-      try {
-        const sessionToken = ensureSessionToken();
-        const params = new URLSearchParams({
-          q: trimmed,
-          types: "poi,address",
-          limit: String(RESULT_LIMIT),
-          session_token: sessionToken,
-          access_token: env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
-        });
-        if (userLocation) {
-          params.set("origin", `${userLocation.longitude},${userLocation.latitude}`);
+
+      const runSearch = async () => {
+        try {
+          const sessionToken = ensureSessionToken();
+          const params = new URLSearchParams({
+            q: trimmed,
+            types: "poi,address",
+            limit: String(RESULT_LIMIT),
+            session_token: sessionToken,
+            access_token: env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
+          });
+          if (userLocation) {
+            params.set("origin", `${userLocation.longitude},${userLocation.latitude}`);
+          }
+
+          const response = await fetch(
+            `https://api.mapbox.com/search/searchbox/v1/suggest?${params.toString()}`,
+            { signal: controller.signal }
+          );
+          if (!response.ok) {
+            throw new Error(`Mapbox Search Box error: ${response.status} ${response.statusText}`);
+          }
+
+          const rawData = (await response.json()) as unknown;
+          const data = rawData as SearchBoxSuggestResponse;
+
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
+
+          const mapped =
+            data.suggestions?.map<PlaceResult>((suggestion) => {
+              const { mapbox_id: mapboxId } = suggestion;
+              const rawCoordinates = suggestion.coordinates;
+              const hasValidCoordinates =
+                rawCoordinates !== undefined &&
+                rawCoordinates !== null &&
+                typeof rawCoordinates.latitude === "number" &&
+                typeof rawCoordinates.longitude === "number";
+              const coordinates = hasValidCoordinates
+                ? { latitude: rawCoordinates.latitude, longitude: rawCoordinates.longitude }
+                : null;
+              const contextNames = extractContextNames(suggestion.context);
+
+              const location: LocationSearchResult | null = coordinates
+                ? {
+                    id: mapboxId,
+                    name: suggestion.name ?? trimmed,
+                    placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
+                    latitude: coordinates.latitude,
+                    longitude: coordinates.longitude,
+                    address: suggestion.full_address ?? suggestion.address,
+                    context: contextNames,
+                  }
+                : null;
+
+              return {
+                mapboxId,
+                name: suggestion.name ?? trimmed,
+                placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
+                address: suggestion.full_address ?? suggestion.address,
+                context: contextNames,
+                distanceMeters: suggestion.distance ?? undefined,
+                location: location ?? undefined,
+              };
+            }) ?? [];
+
+          setPlaceResults(mapped);
+          setPlacesError(null);
+        } catch (err) {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          console.error("Failed to search locations via Mapbox", err);
+          if (requestId === requestIdRef.current) {
+            setPlaceResults([]);
+            setPlacesError("We couldn’t fetch locations. Please try again.");
+          }
+        } finally {
+          if (requestId === requestIdRef.current) {
+            setIsPlacesLoading(false);
+          }
         }
+      };
 
-        const response = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`Mapbox Search Box error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = (await response.json()) as SearchBoxSuggestResponse;
-
-        if (requestId !== requestIdRef.current) {
-          return;
-        }
-
-        const mapped =
-          data.suggestions?.map<PlaceResult>((suggestion) => {
-            const { mapbox_id: mapboxId } = suggestion;
-            const coordinates = suggestion.coordinates
-              ? { latitude: suggestion.coordinates.latitude, longitude: suggestion.coordinates.longitude }
-              : null;
-            const contextNames = extractContextNames(suggestion.context);
-
-            const location: LocationSearchResult | null = coordinates
-              ? {
-                  id: mapboxId,
-                  name: suggestion.name ?? trimmed,
-                  placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
-                  latitude: coordinates.latitude,
-                  longitude: coordinates.longitude,
-                  address: suggestion.full_address ?? suggestion.address,
-                  context: contextNames,
-                }
-              : null;
-
-            return {
-              mapboxId,
-              name: suggestion.name ?? trimmed,
-              placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
-              address: suggestion.full_address ?? suggestion.address,
-              context: contextNames,
-              distanceMeters: suggestion.distance ?? undefined,
-              location: location ?? undefined,
-            };
-          }) ?? [];
-
-        setPlaceResults(mapped);
-        setPlacesError(null);
-      } catch (err) {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        console.error("Failed to search locations via Mapbox", err);
-        if (requestId === requestIdRef.current) {
-          setPlaceResults([]);
-          setPlacesError("We couldn’t fetch locations. Please try again.");
-        }
-      } finally {
-        if (requestId === requestIdRef.current) {
-          setIsPlacesLoading(false);
-        }
-      }
+      void runSearch();
     }, DEBOUNCE_MS);
 
     return () => {
@@ -410,10 +437,6 @@ export function RoutesSidebar({
     }
   }, [planStatus, planError, itineraries, hasOrigin]);
 
-  const busItineraries = useMemo(() => {
-    return (itineraries ?? []).filter((it) => !!it.routeId);
-  }, [itineraries]);
-
   const renderLegDescription = useCallback(
     (leg: PlanItinerary["legs"][number], index: number, legs: PlanItinerary["legs"]) => {
       if (leg.type === "walk") {
@@ -441,10 +464,10 @@ export function RoutesSidebar({
   );
 
   const handleSelectPlace = useCallback(
-    async (place: PlaceResult) => {
+    (place: PlaceResult) => {
       if (!onSelectLocation) return;
 
-      requireAuth(async () => {
+      const performSelection = async () => {
         if (place.location) {
           onSelectLocation(place.location);
           setView("itineraries");
@@ -461,6 +484,10 @@ export function RoutesSidebar({
           setView("itineraries");
         }
         resetSessionToken();
+      };
+
+      requireAuth(() => {
+        void performSelection();
       });
     },
     [fetchLocationDetails, onSelectLocation, resetSessionToken, setView, requireAuth]
@@ -639,20 +666,22 @@ export function RoutesSidebar({
                           const activeLocationId = selectedLocation?.id ?? selectedLocationId;
                           const identifiedLocation = place.location;
                           const summaryContext = place.context.join(" • ");
-                          const subtitle = place.address || summaryContext || place.placeName;
-                          const computedDistanceMeters =
-                            place.distanceMeters !== undefined
-                              ? place.distanceMeters
-                              : userLocation && identifiedLocation
-                                ? distanceBetweenMeters(userLocation, {
-                                    latitude: identifiedLocation.latitude,
-                                    longitude: identifiedLocation.longitude,
-                                  })
-                                : undefined;
-                          const distanceLabel =
+                          const subtitle =
+                            place.address ??
+                            (summaryContext.length > 0 ? summaryContext : place.placeName);
+                          const fallbackDistance =
+                            userLocation && identifiedLocation
+                              ? distanceBetweenMeters(userLocation, {
+                                  latitude: identifiedLocation.latitude,
+                                  longitude: identifiedLocation.longitude,
+                                })
+                              : undefined;
+                          const computedDistanceMeters = place.distanceMeters ?? fallbackDistance;
+                          const formattedDistance =
                             computedDistanceMeters !== undefined
                               ? `${formatDistance(computedDistanceMeters)} away`
-                              : "Distance unavailable";
+                              : undefined;
+                          const distanceLabel = formattedDistance ?? "Distance unavailable";
                           const isActive =
                             (!!activeLocationId &&
                               (identifiedLocation?.id === activeLocationId || place.mapboxId === activeLocationId));
