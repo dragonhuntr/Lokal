@@ -587,7 +587,7 @@ let lastStopsFetchTime = 0;
 const STOPS_CACHE_LIFETIME = 5 * 60 * 1000; //can decrease this
 
 // Cache for route-to-stops mapping (built from stop departures)
-let routeStopsMap: Map<number, Stop[]> = new Map();
+const routeStopsMap = new Map<number, Stop[]>();
 
 export const fetchAllStops = async (): Promise<Stop[]> => {
   // if cache is fresh, use it

@@ -2,10 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/server/db";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Context) {
-  const { id } = params;
+  const { id } = await params;
 
   if (!id) {
     return NextResponse.json({ error: "Route id is required" }, { status: 400 });

@@ -638,7 +638,7 @@ export function MapboxMap({
     for (const feature of itineraryDirections.features) {
       if (feature.geometry.type === "LineString") {
         for (const coordinate of feature.geometry.coordinates) {
-          bounds.extend(coordinate as [number, number]);
+          bounds.extend(coordinate);
         }
       }
     }
@@ -735,7 +735,7 @@ export function MapboxMap({
         )}
 
         {/* Render bus stops for the selected itinerary */}
-        {!selectedRoute && selectedItinerary?.legs && selectedItinerary.legs.map((leg, legIndex) => {
+        {!selectedRoute && selectedItinerary?.legs?.map((leg, legIndex) => {
           if (leg.type !== "bus" || !leg.path?.length) return null;
 
           return leg.path.map((stop, stopIndex) => {

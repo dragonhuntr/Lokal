@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { getClaimsFromCookies, requireSelfOrThrow } from "@/server/auth/service";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 const PreferencesSchema = z.object({
   notificationsEnabled: z.boolean(),
@@ -12,14 +12,15 @@ const PreferencesSchema = z.object({
 
 export async function PUT(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const claims = await getClaimsFromCookies();
-    requireSelfOrThrow(params.id, claims);
+    requireSelfOrThrow(id, claims);
 
     const rawBody = (await request.json()) as unknown;
     const { notificationsEnabled } = PreferencesSchema.parse(rawBody);
 
     const updated = await db.user.update({
-      where: { id: params.id },
+      where: { id },
       data: { notificationsEnabled },
       select: { id: true, email: true, name: true, notificationsEnabled: true },
     });

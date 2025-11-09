@@ -1,12 +1,27 @@
+import dynamic from "next/dynamic";
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
-import { SwaggerClient } from "./swagger-client";
+const SwaggerClient = dynamic(
+  async () => {
+    const mod = await import("./swagger-client");
+    return mod.SwaggerClient;
+  },
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center p-10 text-sm text-muted-foreground">
+        Loading API documentation...
+      </div>
+    ),
+  }
+);
 
 export const metadata: Metadata = {
   title: "API Documentation | Lokal",
   description: "Interactive Swagger UI for the Lokal HTTP API.",
 };
+
+export const dynamic = "force-dynamic";
 
 export default function ApiDocsPage() {
   return (
@@ -19,15 +34,7 @@ export default function ApiDocsPage() {
           </p>
         </div>
         <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
-          <Suspense
-            fallback={
-              <div className="flex h-full w-full items-center justify-center p-10 text-sm text-muted-foreground">
-                Loading API documentation...
-              </div>
-            }
-          >
-            <SwaggerClient url="/api/docs" />
-          </Suspense>
+          <SwaggerClient url="/api/docs" />
         </div>
       </section>
     </main>

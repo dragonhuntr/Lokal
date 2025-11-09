@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { ArrowLeft, Bookmark, Bus, BusFront, Footprints, MapPin, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Bookmark, Bus, BusFront, Footprints, MapPin, Menu, Search, X, History } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
@@ -159,6 +160,7 @@ export function RoutesSidebar({
   selectedItineraryIndex = 0,
   onSelectItinerary,
 }: RoutesSidebarProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<SidebarView>("routes");
   const [routeQuery, setRouteQuery] = useState("");
@@ -183,7 +185,7 @@ export function RoutesSidebar({
 
   const { data: routes, isLoading: areRoutesLoading } = api.bus.getRoutes.useQuery();
   const { data: allVehicles } = api.bus.getAllVehicles.useQuery(undefined, {
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 60000, // Refresh every 60 seconds
   });
 
   const vehiclesByRoute = useMemo(() => {
@@ -554,7 +556,7 @@ export function RoutesSidebar({
                   <div className="truncate text-sm font-semibold text-foreground">
                     {activeDestination?.name ?? "Suggested routes"}
                   </div>
-                  {(activeDestination?.placeName || journeyStops.length > 1) && (
+                  {(activeDestination?.placeName ?? journeyStops.length > 1) && (
                     <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                       {journeyStops.length > 1 && <span>{journeyStops.length} stops</span>}
                       {journeyStops.length > 1 && activeDestination?.placeName && <span>&middot;</span>}
@@ -720,7 +722,7 @@ export function RoutesSidebar({
                             : journeyStopIds.has(place.mapboxId);
                           const isFinalStop = Boolean(
                             finalStopId &&
-                              ((identifiedLocation && identifiedLocation.id === finalStopId) ||
+                              ((identifiedLocation && identifiedLocation.id === finalStopId) ??
                                 place.mapboxId === finalStopId)
                           );
                           const highlightClass = isFinalStop
@@ -913,7 +915,7 @@ export function RoutesSidebar({
                                           console.log('Saving route', rid);
                                           // Use the destination name as the nickname (save full name)
                                           const nickname =
-                                            activeDestination?.name || activeDestination?.placeName || undefined;
+                                            activeDestination?.name ?? activeDestination?.placeName ?? undefined;
                                           void saved.save(rid, nickname);
                                           // After saving, select the route for display
                                           if (onSelectRoute) {
@@ -999,7 +1001,25 @@ export function RoutesSidebar({
                 )}
               </>
             )}
-            <div className="mt-3 border-t pt-3">
+            {session.status === "authenticated" && (
+              <div className="mb-3 flex gap-2">
+                <button
+                  onClick={() => router.push("/journeys")}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                >
+                  <Bookmark className="h-3.5 w-3.5" />
+                  My Journeys
+                </button>
+                <button
+                  onClick={() => router.push("/history")}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  History
+                </button>
+              </div>
+            )}
+            <div className="border-t pt-3">
               {session.status !== "authenticated" ? (
                 <div className="flex items-center justify-between gap-2">
                   <button

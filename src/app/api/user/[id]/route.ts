@@ -4,15 +4,16 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { getClaimsFromCookies, requireSelfOrThrow } from "@/server/auth/service";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const claims = await getClaimsFromCookies();
-    requireSelfOrThrow(params.id, claims);
+    requireSelfOrThrow(id, claims);
 
     const user = await db.user.findUnique({
-      where: { id: params.id },
+      where: { id },
       select: { id: true, email: true, name: true, notificationsEnabled: true },
     });
     if (!user) {
@@ -30,14 +31,15 @@ const UpdateUserSchema = z.object({
 
 export async function PUT(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const claims = await getClaimsFromCookies();
-    requireSelfOrThrow(params.id, claims);
+    requireSelfOrThrow(id, claims);
 
     const rawBody = (await request.json()) as unknown;
     const { name } = UpdateUserSchema.parse(rawBody);
 
     const updated = await db.user.update({
-      where: { id: params.id },
+      where: { id },
       data: { name },
       select: { id: true, email: true, name: true, notificationsEnabled: true },
     });
@@ -51,8 +53,9 @@ export async function PUT(request: Request, { params }: Context) {
 }
 
 export async function DELETE(_request: Request, { params }: Context) {
+  const { id } = await params;
   return NextResponse.json(
-    { message: `DELETE /api/user/${params.id} not implemented` },
+    { message: `DELETE /api/user/${id} not implemented` },
     { status: 501 }
   );
 }

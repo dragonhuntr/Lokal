@@ -124,7 +124,7 @@ export function createBus3DLayer(layerId: string, _modelUrl: string) {
   let scene: THREE.Scene;
   let renderer: THREE.WebGLRenderer;
   let map: MapboxMap;
-  const busInstances: Map<string | number, BusInstance> = new Map();
+  const busInstances = new Map<string | number, BusInstance>();
 
   const customLayer: mapboxgl.CustomLayerInterface = {
     id: layerId,
@@ -169,8 +169,8 @@ export function createBus3DLayer(layerId: string, _modelUrl: string) {
       }
 
       // Access the internal _data property (Mapbox doesn't expose it publicly)
-      const data = (source as any)._data as BusGeoJSON | undefined;
-      if (!data || !data.features) {
+      const data = (source as unknown as { _data?: BusGeoJSON })._data;
+      if (!data?.features) {
         return;
       }
 

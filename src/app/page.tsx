@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
+import { OnboardingOverlay } from "@/app/_components/onboarding-overlay";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
 
@@ -87,7 +88,7 @@ export default function Home() {
   }, []);
 
   const handleSelectItinerary = useCallback(
-    (index: number, itinerary: PlanItinerary) => {
+    (index: number, _itinerary: PlanItinerary) => {
       setSelectedItineraryIndex(index);
       // Clear route selection when selecting an itinerary to show the itinerary visualization
       setSelectedRoute(null);
@@ -199,8 +200,10 @@ export default function Home() {
   // Routes should only be selected via the save bookmark button or manual route selection
 
   return (
-    <main className="relative min-h-screen">
-      <RoutesSidebar
+    <>
+      <OnboardingOverlay />
+      <main className="relative min-h-screen">
+        <RoutesSidebar
         selectedRouteId={selectedRoute?.RouteId}
         onSelectRoute={handleSelectRoute}
         selectedLocationId={activeDestination?.id}
@@ -224,6 +227,7 @@ export default function Home() {
         userLocation={userLocation}
         selectedItinerary={planItineraries?.[selectedItineraryIndex] ?? null}
       />
-    </main>
+      </main>
+    </>
   );
 }

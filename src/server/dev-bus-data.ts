@@ -15,7 +15,7 @@ interface FakeBusConfig {
  * Generate fake vehicles along a route for development/testing
  */
 export function generateFakeBuses(config: FakeBusConfig): RouteDetails["Vehicles"] {
-  const { routeId, stops, color = "0000FF" } = config;
+  const { routeId, stops } = config;
 
   if (!stops || stops.length < 2) {
     console.log(`[DEV MODE] Cannot generate buses for route ${routeId}: insufficient stops (${stops?.length ?? 0} stops)`);
