@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
 import { OnboardingOverlay } from "@/app/_components/onboarding-overlay";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
+import { useSession } from "@/trpc/session";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 type Coordinates = { latitude: number; longitude: number };
@@ -25,6 +27,8 @@ function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
 }
 
 export default function Home() {
+  const searchParams = useSearchParams();
+  const session = useSession();
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<RouteSummary | null>(null);
   const [journeyStops, setJourneyStops] = useState<LocationSearchResult[]>([]);
@@ -95,6 +99,67 @@ export default function Home() {
     },
     []
   );
+
+  // Handle itemId from URL parameter (for saved journeys/routes)
+  useEffect(() => {
+    const itemIdParam = searchParams.get("itemId");
+    if (!itemIdParam) {
+      return;
+    }
+
+    // Wait for session to be loaded
+    if (session.status === "loading") {
+      return;
+    }
+
+    // Check if user is authenticated
+    if (session.status !== "authenticated" || !session.user?.id) {
+      console.error("Not authenticated - cannot load saved item");
+      return;
+    }
+
+    const userId = session.user.id;
+
+    // Fetch the saved item and display it
+    const loadItem = async () => {
+      try {
+        const response = await fetch(
+          `/api/user/${encodeURIComponent(userId)}/saved-items/${encodeURIComponent(itemIdParam)}`,
+          { credentials: "include" }
+        );
+        if (!response.ok) {
+          console.error("Failed to fetch saved item");
+          return;
+        }
+
+        const data = (await response.json()) as {
+          item: {
+            type: "JOURNEY" | "ROUTE";
+            routeId?: string | null;
+            itineraryData?: PlanItinerary | null;
+            originLat?: number | null;
+            originLng?: number | null;
+          };
+        };
+
+        if (data.item.type === "JOURNEY" && data.item.itineraryData) {
+          // Reconstruct the journey by setting the itinerary
+          setPlanItineraries([data.item.itineraryData]);
+          setPlanStatus("success");
+          setSelectedItineraryIndex(0);
+          setSelectedRoute(null);
+        } else if (data.item.type === "ROUTE" && data.item.routeId) {
+          // TODO: Load and display the bus route
+          // For now, just log it
+          console.log("Loading saved route:", data.item.routeId);
+        }
+      } catch (error) {
+        console.error("Error loading saved item:", error);
+      }
+    };
+
+    void loadItem();
+  }, [searchParams, session.status, session.user?.id]);
 
   useEffect(() => {
     if (!("geolocation" in navigator)) {

@@ -12,7 +12,7 @@ import { env } from "@/env";
 import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
-import { useSavedRoutes } from "@/trpc/saved-routes";
+import { useSavedItems } from "@/trpc/saved-items";
 import type { PlanItinerary } from "@/server/routing/service";
 
 const RESULT_LIMIT = 10; // RANGE IS 0 TO 10
@@ -176,7 +176,7 @@ export function RoutesSidebar({
   const [profileOpen, setProfileOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
   const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
-  const saved = useSavedRoutes();
+  const savedItems = useSavedItems();
   const activeDestination = journeyStops.length
     ? journeyStops[journeyStops.length - 1]
     : selectedLocation ?? null;
@@ -210,6 +210,13 @@ export function RoutesSidebar({
 
     previousLocationIdRef.current = currentId;
   }, [activeDestination, view]);
+
+  // Switch to itineraries view when journey is loaded
+  useEffect(() => {
+    if (itineraries && itineraries.length > 0 && planStatus === "success") {
+      setView("itineraries");
+    }
+  }, [itineraries, planStatus]);
 
   useEffect(() => {
     if (session.status === "authenticated" && pendingActionRef.current) {
@@ -587,23 +594,6 @@ export function RoutesSidebar({
                   <MapPin className="h-4 w-4" />
                   Places
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (session.status !== "authenticated") {
-                      setAuthDefaultMode("signin");
-                      setAuthOpen(true);
-                      return;
-                    }
-                    setView("saved");
-                  }}
-                  className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition ${
-                    view === "saved" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Bookmark className="h-4 w-4" />
-                  Saved
-                </button>
               </div>
             )}
 
@@ -769,62 +759,6 @@ export function RoutesSidebar({
                   </ScrollArea.Root>
                 </div>
               </>
-            ) : view === "saved" ? (
-              <>
-                <div className="mb-2 text-xs opacity-60">
-                  {saved.isFetching ? "Loading..." : `${saved.routes.length} saved route${saved.routes.length === 1 ? "" : "s"}`}
-                </div>
-                <div className="flex-1 min-h-0">
-                  <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
-                    <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
-                      <ul className="space-y-2 p-2 pr-3">
-                        {saved.routes.length === 0 ? (
-                          <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
-                            No saved routes yet. Save a route from the itineraries view!
-                          </div>
-                        ) : (
-                          saved.routes.map((savedRoute) => (
-                            <li key={savedRoute.id} className="flex items-start gap-2">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void saved.remove(savedRoute.routeId);
-                                }}
-                                aria-label="Remove saved route"
-                                className="flex-shrink-0 mt-3 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
-                              >
-                                <Bookmark className="h-4 w-4" fill="currentColor" />
-                              </button>
-                              <div className="flex-1 rounded-2xl border bg-card px-4 py-4 shadow-sm">
-                                <div className="min-w-0">
-                                  {savedRoute.nickname && (
-                                    <div className="truncate text-sm font-medium text-foreground" title={savedRoute.nickname}>
-                                      {savedRoute.nickname.length > 20 
-                                        ? savedRoute.nickname.substring(0, 20) + '...' 
-                                        : savedRoute.nickname}
-                                    </div>
-                                  )}
-                                  <div className="truncate text-lg font-semibold tracking-tight text-foreground">
-                                    {savedRoute.route.name}
-                                  </div>
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    Route {savedRoute.route.number}
-                                  </div>
-                                </div>
-                              </div>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </ScrollArea.Viewport>
-                    <ScrollArea.Scrollbar orientation="vertical">
-                      <ScrollArea.Thumb className="rounded-full bg-border/60" />
-                    </ScrollArea.Scrollbar>
-                    <ScrollArea.Corner />
-                  </ScrollArea.Root>
-                </div>
-              </>
             ) : (
               <>
                 {!journeyStops.length ? (
@@ -897,41 +831,35 @@ export function RoutesSidebar({
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       e.preventDefault();
-                                      const rid = itinerary.routeId;
-
-                                      console.log('Bookmark clicked!', { rid, itinerary, hasRouteId: !!rid });
-
-                                      if (!rid) {
-                                        console.log('No route ID, skipping save');
-                                        return;
-                                      }
 
                                       requireAuth(() => {
-                                        console.log('Auth passed, saving/removing route', rid);
-                                        if (saved.isSaved(rid)) {
-                                          console.log('Removing route', rid);
-                                          void saved.remove(rid);
+                                        // Check if this journey is already saved
+                                        const isSaved = savedItems.journeys.some(
+                                          (j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)
+                                        );
+
+                                        if (isSaved) {
+                                          // Find and remove the matching journey
+                                          const journeyToRemove = savedItems.journeys.find(
+                                            (j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)
+                                          );
+                                          if (journeyToRemove) {
+                                            void savedItems.remove(journeyToRemove.id);
+                                          }
                                         } else {
-                                          console.log('Saving route', rid);
-                                          // Use the destination name as the nickname (save full name)
+                                          // Save the complete journey with itinerary data
                                           const nickname =
                                             activeDestination?.name ?? activeDestination?.placeName ?? undefined;
-                                          void saved.save(rid, nickname);
-                                          // After saving, select the route for display
-                                          if (onSelectRoute) {
-                                            const numericRouteId = Number(String(rid).replace(/^\D+/u, ""));
-                                            const matchingRoute = routes?.find((route) => route.RouteId === numericRouteId);
-                                            if (matchingRoute) {
-                                              onSelectRoute(matchingRoute);
-                                            }
-                                          }
+                                          const originLat = userLocation?.latitude ?? 0;
+                                          const originLng = userLocation?.longitude ?? 0;
+                                          void savedItems.saveJourney(itinerary, originLat, originLng, nickname);
                                         }
                                       });
                                     }}
-                                    aria-label={itinerary.routeId && saved.isSaved(itinerary.routeId) ? "Unsave route" : "Save route"}
-                                    className={`flex-shrink-0 mt-3 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${itinerary.routeId && saved.isSaved(itinerary.routeId) ? "bg-blue-50 border-blue-300 text-blue-700" : "border-border/70 text-muted-foreground hover:bg-muted"}`}
+                                    aria-label="Save journey"
+                                    className={`flex-shrink-0 mt-3 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${savedItems.journeys.some((j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)) ? "bg-blue-50 border-blue-300 text-blue-700" : "border-border/70 text-muted-foreground hover:bg-muted"}`}
                                   >
-                                    <Bookmark className="h-4 w-4" fill={itinerary.routeId && saved.isSaved(itinerary.routeId) ? "currentColor" : "none"} />
+                                    <Bookmark className="h-4 w-4" fill={savedItems.journeys.some((j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)) ? "currentColor" : "none"} />
                                   </button>
                                   <div
                                     onClick={() => onSelectItinerary?.(index, itinerary)}
