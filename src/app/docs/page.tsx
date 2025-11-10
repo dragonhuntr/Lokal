@@ -1,7 +1,7 @@
-import dynamic from "next/dynamic";
+import dynamicImport from "next/dynamic";
 import type { Metadata } from "next";
 
-const SwaggerClient = dynamic(
+const SwaggerClient = dynamicImport(
   async () => {
     const mod = await import("./swagger-client");
     return mod.SwaggerClient;

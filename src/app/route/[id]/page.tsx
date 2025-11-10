@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { MapPin, Clock, Bookmark, Share2, ArrowLeft } from "lucide-react";
 import { useSession } from "@/trpc/session";
-import { useSavedRoutes } from "@/trpc/saved-routes";
+import { useSavedItems } from "@/trpc/saved-items";
 import { AuthDialog } from "@/app/_components/auth-dialog";
 
 interface RouteDetails {
@@ -22,7 +22,7 @@ export default function SharedRoutePage() {
   const router = useRouter();
   const routeId = params.id as string;
   const session = useSession();
-  const saved = useSavedRoutes();
+  const savedItems = useSavedItems();
   const [route, setRoute] = useState<RouteDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,10 +64,11 @@ export default function SharedRoutePage() {
     if (!route) return;
 
     try {
-      if (saved.isSaved(routeId)) {
-        await saved.remove(routeId);
+      const existingSaved = savedItems.routes.find((r) => r.routeId === routeId);
+      if (existingSaved) {
+        await savedItems.remove(existingSaved.id);
       } else {
-        await saved.save(routeId, route.name);
+        await savedItems.saveRoute(routeId, route.name);
       }
     } catch (err) {
       console.error("Failed to save route", err);
@@ -114,7 +115,7 @@ export default function SharedRoutePage() {
     );
   }
 
-  const isSaved = saved.isSaved(routeId);
+  const isSaved = savedItems.routes.some((r) => r.routeId === routeId);
 
   return (
     <div className="min-h-screen bg-background">
