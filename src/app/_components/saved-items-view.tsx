@@ -1,6 +1,7 @@
 "use client";
 
-import { MapPin, Bus, Calendar, Navigation, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { MapPin, Bus, Calendar, Navigation, Share2, Trash2 } from "lucide-react";
 import type { useSavedItems } from "@/trpc/saved-items";
 
 interface SavedItemsViewProps {
@@ -22,6 +23,7 @@ export function SavedItemsView({
   onViewOnMap,
   onDelete,
 }: SavedItemsViewProps) {
+  const [copiedJourneyId, setCopiedJourneyId] = useState<string | null>(null);
   const filteredItems = filter === "all"
     ? items.items
     : filter === "journeys"
@@ -123,6 +125,33 @@ export function SavedItemsView({
 
                 {/* Actions */}
                 <div className="flex gap-2">
+                  {item.type === "JOURNEY" && (
+                    <button
+                      onClick={async () => {
+                        const destination = getJourneyDestinationName(item.itineraryData?.legs ?? []);
+                        const etaMinutes = formatDurationMinutes(item.totalDuration ?? 0);
+                        const shareUrl = `${window.location.origin}/journey/${item.id}`;
+                        const message = `View my Journey on Lokal! ETA to ${destination} is ${etaMinutes}. ${shareUrl}`;
+
+                        try {
+                          if (navigator.clipboard?.writeText) {
+                            await navigator.clipboard.writeText(message);
+                          } else {
+                            throw new Error("Clipboard API unavailable");
+                          }
+                          setCopiedJourneyId(item.id);
+                          setTimeout(() => setCopiedJourneyId((current) => (current === item.id ? null : current)), 2000);
+                        } catch (error) {
+                          console.error("Failed to copy journey share link", error);
+                          alert("Unable to copy share link. Please copy it manually: " + shareUrl);
+                        }
+                      }}
+                      className="flex items-center justify-center gap-1.5 rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+                    >
+                      <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {copiedJourneyId === item.id ? "Copied!" : "Share"}
+                    </button>
+                  )}
                   <button
                     onClick={() => onViewOnMap(item.id)}
                     className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-medium focus:outline-2 focus:outline-offset-2 focus:outline-ring"
@@ -205,4 +234,18 @@ function RouteDetails({ route }: { route: { type: "ROUTE"; routeId: string } }) 
       <div className="text-xs">Route ID: {route.routeId}</div>
     </div>
   );
+}
+
+function getJourneyDestinationName(legs: Array<{ endStopName?: string | null; end?: { stopName?: string | null } | null }>) {
+  if (!legs.length) {
+    return "my destination";
+  }
+
+  const lastLeg = legs[legs.length - 1];
+  return lastLeg?.endStopName ?? lastLeg?.end?.stopName ?? "my destination";
+}
+
+function formatDurationMinutes(duration: number) {
+  const rounded = Math.max(1, Math.round(duration));
+  return `${rounded} minute${rounded === 1 ? "" : "s"}`;
 }
