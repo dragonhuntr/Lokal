@@ -4,25 +4,21 @@ import { useState } from "react";
 import { MapPin, Bus, Calendar, Navigation, Share2, Trash2 } from "lucide-react";
 import type { useSavedItems } from "@/trpc/saved-items";
 
-interface SavedItemsViewProps {
+interface SavedJourneysViewProps {
   items: ReturnType<typeof useSavedItems>;
-  filter: "all" | "journeys" | "routes";
-  onFilterChange: (filter: "all" | "journeys" | "routes") => void;
   deleteConfirm: string | null;
   onDeleteConfirm: (id: string | null) => void;
   onViewOnMap: (itemId: string) => void;
   onDelete: (itemId: string) => Promise<void>;
 }
 
-export function SavedItemsView({
+export function SavedJourneysView({
   items,
-  filter,
-  onFilterChange,
   deleteConfirm,
   onDeleteConfirm,
   onViewOnMap,
   onDelete,
-}: SavedItemsViewProps) {
+}: SavedJourneysViewProps) {
   const [copiedJourneyId, setCopiedJourneyId] = useState<string | null>(null);
   // Only show journeys (routes are now shown in explore mode)
   const filteredItems = items.journeys;

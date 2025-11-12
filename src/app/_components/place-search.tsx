@@ -7,6 +7,7 @@ import type { LocationSearchResult } from "./routes-sidebar";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSession } from "@/trpc/session";
 
 interface PlaceResult {
   mapboxId: string;
@@ -22,6 +23,7 @@ interface PlaceSearchProps {
   placeQuery: string;
   onPlaceQueryChange: (query: string) => void;
   placeResults: PlaceResult[];
+  
   isLoading: boolean;
   error: string | null;
   userLocation?: { latitude: number; longitude: number } | null;
@@ -83,6 +85,7 @@ export function PlaceSearch({
   onSetManualOrigin,
   onRemoveStop,
 }: PlaceSearchProps) {
+  const session = useSession();
   const placesWithDistance = useMemo(() => {
     const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
 
@@ -132,12 +135,13 @@ export function PlaceSearch({
           type="search"
           value={placeQuery}
           onChange={(event) => onPlaceQueryChange(event.target.value)}
-          placeholder="Search locations or buildings…"
+          placeholder={session.user === null ? "Sign in to search for locations or buildings." : "Search locations or buildings…"}
           className="h-11 w-full bg-transparent text-sm outline-none"
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck="false"
+		  disabled={session.user === null}
         />
       </div>
 
