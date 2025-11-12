@@ -198,6 +198,45 @@ export default function Home() {
     void loadItem();
   }, [searchParams, session.status, session.user?.id]);
 
+  // Handle shared journey from URL parameter (public access)
+  useEffect(() => {
+    const sharedJourneyId = searchParams.get("journeyId");
+    if (!sharedJourneyId) {
+      return;
+    }
+
+    const loadSharedJourney = async () => {
+      try {
+        const response = await fetch(`/api/journeys/${encodeURIComponent(sharedJourneyId)}`);
+        if (!response.ok) {
+          console.error("Failed to fetch shared journey");
+          return;
+        }
+
+        const data = (await response.json()) as {
+          journey: { itineraryData: PlanItinerary };
+        };
+
+        if (!data.journey?.itineraryData) {
+          console.error("Shared journey missing itinerary data");
+          return;
+        }
+
+        setMode("plan");
+        setPlanItineraries([data.journey.itineraryData]);
+        setPlanStatus("success");
+        setPlanError(null);
+        setSelectedItineraryIndex(0);
+        setSelectedRoute(null);
+        setViewingSavedJourney(true);
+      } catch (error) {
+        console.error("Error loading shared journey:", error);
+      }
+    };
+
+    void loadSharedJourney();
+  }, [searchParams]);
+
   useEffect(() => {
     if (!("geolocation" in navigator)) {
       console.warn("Geolocation not supported in this browser");
