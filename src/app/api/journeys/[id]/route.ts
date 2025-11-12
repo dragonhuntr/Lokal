@@ -26,6 +26,8 @@ export async function GET(_request: Request, { params }: Context) {
         routeId: true,
         originLat: true,
         originLng: true,
+        destinationLat: true,
+        destinationLng: true,
       },
     });
 
@@ -45,6 +47,10 @@ export async function GET(_request: Request, { params }: Context) {
             totalDistance: item.totalDistance,
             totalDuration: item.totalDuration,
             createdAt: item.createdAt,
+            originLat: item.originLat,
+            originLng: item.originLng,
+            destinationLat: item.destinationLat,
+            destinationLng: item.destinationLng,
           },
         });
       } else if (item.type === "ROUTE" && item.routeId) {
@@ -74,6 +80,10 @@ export async function GET(_request: Request, { params }: Context) {
         totalDistance: item.totalDistance,
         totalDuration: item.totalDuration,
         createdAt: item.createdAt,
+        originLat: item.originLat,
+        originLng: item.originLng,
+        destinationLat: item.destinationLat,
+        destinationLng: item.destinationLng,
       },
     });
   } catch (error) {

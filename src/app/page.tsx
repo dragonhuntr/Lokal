@@ -42,6 +42,8 @@ export default function Home() {
   const [viewingSavedJourney, setViewingSavedJourney] = useState(false);
   const [sharedJourneyDestinationName, setSharedJourneyDestinationName] = useState<string | null>(null);
   const [locationWatcherId, setLocationWatcherId] = useState<number | null>(null);
+  const [savedJourneyOrigin, setSavedJourneyOrigin] = useState<Coordinates | null>(null);
+  const [savedJourneyDestination, setSavedJourneyDestination] = useState<Coordinates | null>(null);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -65,6 +67,8 @@ export default function Home() {
     setSelectedItineraryIndex(0);
     setViewingSavedJourney(false); // Clear saved journey flag when starting new journey
     setSharedJourneyDestinationName(null); // Clear shared journey destination name
+    setSavedJourneyOrigin(null); // Clear saved journey origin
+    setSavedJourneyDestination(null); // Clear saved journey destination
   }, []);
 
   const handleRemoveStop = useCallback((id: string) => {
@@ -98,6 +102,8 @@ export default function Home() {
     setSelectedItineraryIndex(0);
     setViewingSavedJourney(false); // Clear saved journey flag
     setSharedJourneyDestinationName(null); // Clear shared journey destination name
+    setSavedJourneyOrigin(null); // Clear saved journey origin
+    setSavedJourneyDestination(null); // Clear saved journey destination
   }, []);
 
   const handlePlanJourney = useCallback(() => {
@@ -151,7 +157,14 @@ export default function Home() {
         }
 
         const data = (await response.json()) as {
-          journey?: { itineraryData: PlanItinerary; destinationName?: string | null };
+          journey?: {
+            itineraryData: PlanItinerary;
+            destinationName?: string | null;
+            originLat?: number | null;
+            originLng?: number | null;
+            destinationLat?: number | null;
+            destinationLng?: number | null;
+          };
           route?: { routeId: string };
         };
 
@@ -166,6 +179,25 @@ export default function Home() {
           setViewingSavedJourney(true);
           // Always set destination name if available (works for both authenticated and public)
           setSharedJourneyDestinationName(data.journey.destinationName ?? null);
+          // Store saved origin and destination coordinates for use when location is unavailable
+          if (data.journey.originLat !== null && data.journey.originLat !== undefined &&
+              data.journey.originLng !== null && data.journey.originLng !== undefined) {
+            setSavedJourneyOrigin({
+              latitude: data.journey.originLat,
+              longitude: data.journey.originLng,
+            });
+          } else {
+            setSavedJourneyOrigin(null);
+          }
+          if (data.journey.destinationLat !== null && data.journey.destinationLat !== undefined &&
+              data.journey.destinationLng !== null && data.journey.destinationLng !== undefined) {
+            setSavedJourneyDestination({
+              latitude: data.journey.destinationLat,
+              longitude: data.journey.destinationLng,
+            });
+          } else {
+            setSavedJourneyDestination(null);
+          }
         } 
         // Handle route type (only for authenticated users viewing their own saved routes)
         else if (data.route?.routeId) {
@@ -443,6 +475,8 @@ export default function Home() {
         onExitSavedJourneyView={() => {
           setViewingSavedJourney(false);
           setSharedJourneyDestinationName(null);
+          setSavedJourneyOrigin(null);
+          setSavedJourneyDestination(null);
         }}
       />
       <MapboxMap
@@ -451,6 +485,8 @@ export default function Home() {
         journeyStops={journeyStops}
         userLocation={effectiveOrigin}
         selectedItinerary={planItineraries?.[selectedItineraryIndex] ?? null}
+        savedJourneyOrigin={viewingSavedJourney ? savedJourneyOrigin : null}
+        savedJourneyDestination={viewingSavedJourney ? savedJourneyDestination : null}
       />
       </main>
     </>

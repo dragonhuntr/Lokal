@@ -20,6 +20,8 @@ interface MapboxMapProps {
   journeyStops?: LocationSearchResult[] | null;
   userLocation?: { latitude: number; longitude: number } | null;
   selectedItinerary?: PlanItinerary | null;
+  savedJourneyOrigin?: { latitude: number; longitude: number } | null;
+  savedJourneyDestination?: { latitude: number; longitude: number } | null;
 }
 
 interface NavigationRouteGeoJSON {
@@ -78,6 +80,8 @@ export function MapboxMap({
   journeyStops: journeyStopsProp,
   userLocation,
   selectedItinerary,
+  savedJourneyOrigin,
+  savedJourneyDestination,
 }: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -431,8 +435,11 @@ export function MapboxMap({
   const [itineraryDirections, setItineraryDirections] = useState<NavigationRouteGeoJSON | null>(null);
   const itineraryRequestIdRef = useRef(0);
 
+  // Use saved origin if userLocation is unavailable (for saved journeys without location access)
+  const effectiveOriginForItinerary = userLocation ?? savedJourneyOrigin;
+
   useEffect(() => {
-    if (!selectedItinerary?.legs?.length || !userLocation) {
+    if (!selectedItinerary?.legs?.length || !effectiveOriginForItinerary) {
       setItineraryDirections(null);
       return;
     }
@@ -443,11 +450,11 @@ export function MapboxMap({
 
     const fetchItineraryDirections = async () => {
       try {
-        // Build coordinate list: user location + all leg endpoints
+        // Build coordinate list: effective origin + all leg endpoints
         const coordinates: string[] = [];
 
-        // Add user location as the starting point
-        coordinates.push(`${userLocation.longitude},${userLocation.latitude}`);
+        // Add effective origin as the starting point (userLocation or savedJourneyOrigin)
+        coordinates.push(`${effectiveOriginForItinerary.longitude},${effectiveOriginForItinerary.latitude}`);
 
         // Add each leg's endpoint
         selectedItinerary.legs.forEach((leg) => {
@@ -507,7 +514,7 @@ export function MapboxMap({
     return () => {
       controller.abort();
     };
-  }, [selectedItinerary, userLocation]);
+  }, [selectedItinerary, effectiveOriginForItinerary]);
 
   // Build GeoJSON for selected itinerary with colored segments based on leg types
   const itineraryGeoJson = useMemo(() => {
@@ -874,6 +881,26 @@ export function MapboxMap({
             <div className="relative flex items-center justify-center">
               <span className="absolute h-8 w-8 rounded-full bg-sky-400/40 blur-md" />
               <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-sky-500 shadow-md" />
+            </div>
+          </Marker>
+        )}
+        
+        {/* Show saved origin marker when viewing saved journey without location access */}
+        {!userLocation && savedJourneyOrigin && (
+          <Marker latitude={savedJourneyOrigin.latitude} longitude={savedJourneyOrigin.longitude} anchor="center">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute h-8 w-8 rounded-full bg-green-400/40 blur-md" />
+              <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-green-500 shadow-md" />
+            </div>
+          </Marker>
+        )}
+        
+        {/* Show saved destination marker when viewing saved journey without location access */}
+        {!userLocation && savedJourneyDestination && (
+          <Marker latitude={savedJourneyDestination.latitude} longitude={savedJourneyDestination.longitude} anchor="bottom">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute h-8 w-8 rounded-full bg-blue-500/30 blur-md" />
+              <span className="inline-block h-4 w-4 rounded-full border-2 border-white bg-blue-600 shadow-lg" />
             </div>
           </Marker>
         )}
