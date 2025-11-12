@@ -432,7 +432,7 @@ const startPolling = () => {
       const RouteDirectionSchema = z.object({
         Direction: z.string(),
         DirectionCode: z.string(),
-        RouteId: z.string(),
+        RouteId: z.coerce.string(),
         RouteRecordId: z.number(),
         Departures: z.array(StopDepartureSchema),
         HeadwayDepartures: z.array(HeadwayDepartureSchema).nullable(),
@@ -545,7 +545,7 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
       const RouteDirectionSchema = z.object({
         Direction: z.string(),
         DirectionCode: z.string(),
-        RouteId: z.string(),
+        RouteId: z.coerce.string(),
         RouteRecordId: z.number(),
         Departures: z.array(StopDepartureSchema),
         HeadwayDepartures: z.array(HeadwayDepartureSchema).nullable(),
@@ -585,9 +585,6 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
 let stopsCache: Stop[] = [];
 let lastStopsFetchTime = 0;
 const STOPS_CACHE_LIFETIME = 5 * 60 * 1000; //can decrease this
-
-// Cache for route-to-stops mapping (built from stop departures)
-const routeStopsMap = new Map<number, Stop[]>();
 
 export const fetchAllStops = async (): Promise<Stop[]> => {
   // if cache is fresh, use it

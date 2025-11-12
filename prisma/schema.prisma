@@ -51,7 +51,7 @@ model SavedItem {
   nickname String?
   type     ItemType @default(JOURNEY)
 
-  // For simple route bookmarks (type: ROUTE)
+  // For bus line bookmarks (type: ROUTE)
   routeId String?
 
   // For complex journeys (type: JOURNEY)

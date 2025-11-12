@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
@@ -12,6 +12,7 @@ import { useSession } from "@/trpc/session";
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 type Coordinates = { latitude: number; longitude: number };
 type PlanStatus = "idle" | "loading" | "success" | "error";
+type AppMode = "explore" | "plan" | "saved";
 
 function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
   if (!value || typeof value !== "object") {
@@ -29,26 +30,38 @@ function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
 export default function Home() {
   const searchParams = useSearchParams();
   const session = useSession();
+  const [mode, setMode] = useState<AppMode>("explore");
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
+  const [manualOrigin, setManualOrigin] = useState<LocationSearchResult | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<RouteSummary | null>(null);
   const [journeyStops, setJourneyStops] = useState<LocationSearchResult[]>([]);
   const [planItineraries, setPlanItineraries] = useState<PlanItinerary[] | null>(null);
   const [planStatus, setPlanStatus] = useState<PlanStatus>("idle");
   const [planError, setPlanError] = useState<string | null>(null);
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
+  const [viewingSavedJourney, setViewingSavedJourney] = useState(false);
+
+  // Effective origin is either user's GPS location or manually set origin
+  const effectiveOrigin = useMemo(
+    () => userLocation ?? (manualOrigin ? { latitude: manualOrigin.latitude, longitude: manualOrigin.longitude } : null),
+    [userLocation, manualOrigin]
+  );
 
   const activeDestination = journeyStops.length ? journeyStops[journeyStops.length - 1] : null;
 
   const handleAddStop = useCallback((location: LocationSearchResult) => {
+    setMode("plan"); // Switch to plan mode when adding destinations
     setSelectedRoute(null);
     setJourneyStops((previous) => {
       const withoutDuplicate = previous.filter((stop) => stop.id !== location.id);
       return [...withoutDuplicate, location];
     });
+    // Don't auto-plan - wait for user to click "Plan Journey" button
     setPlanItineraries(null);
-    setPlanStatus("loading");
+    setPlanStatus("idle");
     setPlanError(null);
     setSelectedItineraryIndex(0);
+    setViewingSavedJourney(false); // Clear saved journey flag when starting new journey
   }, []);
 
   const handleRemoveStop = useCallback((id: string) => {
@@ -80,15 +93,24 @@ export default function Home() {
     setPlanStatus("idle");
     setPlanError(null);
     setSelectedItineraryIndex(0);
+    setViewingSavedJourney(false); // Clear saved journey flag
   }, []);
 
-  const handleSelectRoute = useCallback((route: RouteSummary) => {
-    setJourneyStops([]);
-    setPlanItineraries(null);
-    setPlanStatus("idle");
-    setPlanError(null);
-    setSelectedItineraryIndex(0);
-    setSelectedRoute(route);
+  const handlePlanJourney = useCallback(() => {
+    if (journeyStops.length > 0) {
+      setPlanItineraries(null);
+      setPlanStatus("loading");
+      setPlanError(null);
+      setSelectedItineraryIndex(0);
+    }
+  }, [journeyStops]);
+
+  const handleSelectRoute = useCallback((route: RouteSummary | undefined) => {
+    if (route) {
+      setMode("explore"); // Switch to explore mode when viewing routes
+    }
+    setSelectedRoute(route ?? null);
+    // Don't clear journey data - allow viewing routes while planning
   }, []);
 
   const handleSelectItinerary = useCallback(
@@ -144,14 +166,29 @@ export default function Home() {
 
         if (data.item.type === "JOURNEY" && data.item.itineraryData) {
           // Reconstruct the journey by setting the itinerary
+          setMode("plan");
           setPlanItineraries([data.item.itineraryData]);
           setPlanStatus("success");
           setSelectedItineraryIndex(0);
           setSelectedRoute(null);
+          setViewingSavedJourney(true); // Flag that we're viewing a saved journey
         } else if (data.item.type === "ROUTE" && data.item.routeId) {
-          // TODO: Load and display the bus route
-          // For now, just log it
-          console.log("Loading saved route:", data.item.routeId);
+          // Load the saved bus route
+          setMode("explore");
+          try {
+            const routesResponse = await fetch("/api/routes");
+            if (routesResponse.ok) {
+              const routesData = (await routesResponse.json()) as { routes: RouteSummary[] };
+              const route = routesData.routes.find((r) => r.RouteId.toString() === data.item.routeId);
+              if (route) {
+                setSelectedRoute(route);
+                setPlanItineraries(null);
+                setJourneyStops([]);
+              }
+            }
+          } catch (err) {
+            console.error("Failed to load route:", err);
+          }
         }
       } catch (error) {
         console.error("Error loading saved item:", error);
@@ -198,7 +235,7 @@ export default function Home() {
       return;
     }
 
-    if (!userLocation) {
+    if (!effectiveOrigin) {
       setPlanStatus("loading");
       setPlanError(null);
       return;
@@ -217,7 +254,7 @@ export default function Home() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            origin: userLocation,
+            origin: effectiveOrigin,
             destinations: journeyStops.map((stop) => ({
               latitude: stop.latitude,
               longitude: stop.longitude,
@@ -259,7 +296,7 @@ export default function Home() {
     return () => {
       controller.abort();
     };
-  }, [journeyStops, userLocation]);
+  }, [journeyStops, effectiveOrigin]);
 
   // Removed automatic route selection when itinerary changes
   // Routes should only be selected via the save bookmark button or manual route selection
@@ -269,6 +306,8 @@ export default function Home() {
       <OnboardingOverlay />
       <main className="relative min-h-screen">
         <RoutesSidebar
+        mode={mode}
+        onModeChange={setMode}
         selectedRouteId={selectedRoute?.RouteId}
         onSelectRoute={handleSelectRoute}
         selectedLocationId={activeDestination?.id}
@@ -277,19 +316,24 @@ export default function Home() {
         onAddStop={handleAddStop}
         onRemoveStop={handleRemoveStop}
         onClearJourney={handleClearJourney}
+        onPlanJourney={handlePlanJourney}
         userLocation={userLocation}
+        manualOrigin={manualOrigin}
+        onSetManualOrigin={setManualOrigin}
         itineraries={planItineraries}
         planStatus={planStatus}
         planError={planError}
-        hasOrigin={Boolean(userLocation)}
+        hasOrigin={Boolean(effectiveOrigin)}
         selectedItineraryIndex={selectedItineraryIndex}
         onSelectItinerary={handleSelectItinerary}
+        viewingSavedJourney={viewingSavedJourney}
+        onExitSavedJourneyView={() => setViewingSavedJourney(false)}
       />
       <MapboxMap
         selectedRoute={selectedRoute}
         selectedLocation={activeDestination}
         journeyStops={journeyStops}
-        userLocation={userLocation}
+        userLocation={effectiveOrigin}
         selectedItinerary={planItineraries?.[selectedItineraryIndex] ?? null}
       />
       </main>

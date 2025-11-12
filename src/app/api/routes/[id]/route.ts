@@ -18,6 +18,16 @@ export async function GET(_request: Request, { params }: Context) {
         destination: true,
         totalStops: true,
         duration: true,
+        stops: {
+          orderBy: { sequence: "asc" },
+          select: {
+            id: true,
+            name: true,
+            latitude: true,
+            longitude: true,
+            sequence: true,
+          },
+        },
       },
     });
 
