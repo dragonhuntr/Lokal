@@ -7,7 +7,6 @@ import { ArrowLeft, Bookmark, Bus, MapPin, Menu, X } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
-import { SaveJourneyDialog } from "@/app/_components/save-journey-dialog";
 import { RoutesList } from "@/app/_components/routes-list";
 import { PlaceSearch } from "@/app/_components/place-search";
 import { ItineraryOptions } from "@/app/_components/itinerary-options";
@@ -141,7 +140,6 @@ export function RoutesSidebar({
   const session = useSession();
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [saveJourneyOpen, setSaveJourneyOpen] = useState(false);
   const pendingActionRef = useRef<(() => void | Promise<void>) | null>(null);
   const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
   const savedItems = useSavedItems();
@@ -351,7 +349,7 @@ export function RoutesSidebar({
             access_token: env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
           });
           if (userLocation) {
-            params.set("origin", `${userLocation.longitude},${userLocation.latitude}`);
+            params.set("proximity", `${userLocation.longitude},${userLocation.latitude}`);
           }
 
           const response = await fetch(
@@ -678,7 +676,12 @@ export function RoutesSidebar({
                 itinerary={itineraries?.[selectedItineraryIndex] ?? null}
                 activeDestination={activeDestination}
                 requireAuth={requireAuth}
-                onOpenSaveDialog={() => setSaveJourneyOpen(true)}
+                onSaveJourney={async (itinerary, nickname) => {
+                  if (!userLocation) {
+                    throw new Error("User location required to save journey");
+                  }
+                  await savedItems.saveJourney(itinerary, userLocation.latitude, userLocation.longitude, nickname);
+                }}
                 viewingSavedJourney={viewingSavedJourney}
                 onBackToSavedItems={() => {
                   if (onExitSavedJourneyView) {
@@ -755,14 +758,6 @@ export function RoutesSidebar({
       </Dialog.Root>
       <AuthDialog open={authOpen} onOpenChange={setAuthOpen} defaultMode={authDefaultMode} />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
-      <SaveJourneyDialog
-        open={saveJourneyOpen}
-        onOpenChange={setSaveJourneyOpen}
-        itinerary={itineraries?.[selectedItineraryIndex] ?? null}
-        originLat={userLocation?.latitude ?? null}
-        originLng={userLocation?.longitude ?? null}
-        defaultNickname={activeDestination?.name ?? activeDestination?.placeName ?? "My Journey"}
-      />
     </div>
   );
 }

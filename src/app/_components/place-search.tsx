@@ -110,12 +110,8 @@ export function PlaceSearch({
         
         // Filter to only include results within 150 miles
         return result.distanceMeters <= MAX_RADIUS_METERS;
-      })
-      .sort((a, b) => {
-        const aDistance = a.distanceMeters ?? Number.POSITIVE_INFINITY;
-        const bDistance = b.distanceMeters ?? Number.POSITIVE_INFINITY;
-        return aDistance - bDistance;
       });
+      // Server-side sorting via proximity parameter - no client-side sort needed
   }, [placeResults, userLocation]);
 
   const statusMessage = useMemo(() => {
