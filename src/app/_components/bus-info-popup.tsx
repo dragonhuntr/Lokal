@@ -15,18 +15,26 @@ export function BusInfoPopup({ vehicle, onClose }: BusInfoPopupProps) {
 
   const formatLastUpdated = (lastUpdated: string) => {
     try {
-      const date = new Date(lastUpdated);
-      const now = new Date();
-      const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-      if (diffSeconds < 60) return "Just now";
-      if (diffSeconds < 120) return "1 min ago";
-      if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} mins ago`;
-
-      return date.toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      });
+		// Handle /Date(1762969896000-0500)/ format for legacy .NET date strings
+		const match = lastUpdated.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
+		if (match) {
+		  // Unix ms timestamp (ignore the timezone/group 2)
+		  const date = new Date(Number(match[1]))
+		  const now = new Date();
+		  const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+	
+		  if (diffSeconds < 60) return "Just now";
+		  if (diffSeconds < 120) return "1 min ago";
+		  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} mins ago`;
+	
+		  return date.toLocaleTimeString([], {
+			hour: "numeric",
+			minute: "2-digit",
+		  });
+		}
+		else {
+			return "Invalid date";
+		}
     } catch {
       return "Unknown";
     }
@@ -121,7 +129,7 @@ export function BusInfoPopup({ vehicle, onClose }: BusInfoPopupProps) {
 
         <div className="border-t border-gray-100 pt-3">
           <p className="text-xs text-gray-500">
-            Updated: {formatLastUpdated(vehicle.LastUpdated)}
+            Updated: {formatLastUpdated(vehicle.LastUpdated)}<br/>
           </p>
         </div>
         </div>

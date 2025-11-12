@@ -15,7 +15,7 @@ import { PlaceSearch } from "@/app/_components/place-search";
 import { ItineraryOptions } from "@/app/_components/itinerary-options";
 import { DirectionsSteps } from "@/app/_components/directions-steps";
 import { RouteDetailView } from "@/app/_components/route-detail-view";
-import { SavedItemsView } from "@/app/_components/saved-items-view";
+import { SavedJourneysView } from "@/app/_components/saved-items-view";
 import { extractContextNames } from "@/app/_components/utils/mapbox-helpers";
 import { env } from "@/env";
 import { api } from "@/trpc/react";
@@ -153,7 +153,6 @@ export function RoutesSidebar({
   const pendingActionRef = useRef<(() => void | Promise<void>) | null>(null);
   const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
   const savedItems = useSavedItems();
-  const [savedItemsFilter, setSavedItemsFilter] = useState<"all" | "journeys" | "routes">("all");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
@@ -766,10 +765,8 @@ export function RoutesSidebar({
                 }}
               />
             ) : mode === "saved" && view === "saved-items" ? (
-              <SavedItemsView
+              <SavedJourneysView
                 items={savedItems}
-                filter={savedItemsFilter}
-                onFilterChange={setSavedItemsFilter}
                 deleteConfirm={deleteConfirm}
                 onDeleteConfirm={setDeleteConfirm}
                 onViewOnMap={(itemId: string) => {

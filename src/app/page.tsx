@@ -229,6 +229,15 @@ export default function Home() {
   }, [searchParams, session.status]);
 
   // Request location permission and start watching
+  // 
+  // IMPORTANT: iOS Safari Geolocation Behavior
+  // iOS Safari has a known quirk where navigator.permissions.query({ name: 'geolocation' })
+  // will ALWAYS return "prompt" even after permission is granted. This is intentional Safari
+  // behavior - even if location services are enabled for Safari in iOS settings, websites
+  // must still prompt the user for permission.
+  // 
+  // Therefore, we directly call getCurrentPosition() instead of checking permissions first.
+  // See: https://stackoverflow.com/questions/75872915/geolocation-is-already-allowed-on-ios-safari-16-but-navigator-permissions-still
   const requestLocation = useCallback(() => {
     if (!("geolocation" in navigator)) {
       console.warn("Geolocation not supported in this browser");
@@ -253,7 +262,10 @@ export default function Home() {
 
     console.log("Requesting location permission...");
 
-    // First, get current position (this triggers permission prompt on mobile Safari)
+    // Directly call getCurrentPosition() - this triggers permission prompt on iOS Safari
+    // Note: We don't check navigator.permissions.query() first because iOS Safari always
+    // returns "prompt" even after permission is granted, so we must trigger the actual
+    // permission request to determine the real status.
     navigator.geolocation.getCurrentPosition(
       (position) => {
         console.log("Location permission granted, position received:", position.coords);
