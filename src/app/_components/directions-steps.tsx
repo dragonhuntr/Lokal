@@ -1,7 +1,8 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { ArrowLeft, Bookmark, BusFront, Footprints } from "lucide-react";
+import { ArrowLeft, Bookmark, BusFront, Footprints, Share2 } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { LocationSearchResult } from "./routes-sidebar";
 import { useSavedItems } from "@/trpc/saved-items";
@@ -19,6 +20,11 @@ function formatMinutes(value: number) {
   const rounded = Math.round(value);
   if (rounded <= 0) return "<1 min";
   return `${rounded} min${rounded === 1 ? "" : "s"}`;
+}
+
+function formatShareMinutes(value: number) {
+  const rounded = Math.max(1, Math.round(value));
+  return `${rounded} minute${rounded === 1 ? "" : "s"}`;
 }
 
 function formatDistance(distanceMeters: number) {
@@ -39,6 +45,12 @@ export function DirectionsSteps({
   onBackToSavedItems,
 }: DirectionsStepsProps) {
   const savedItems = useSavedItems();
+  const [shareSuccess, setShareSuccess] = useState(false);
+
+  const matchingSavedJourney = useMemo(() => {
+    if (!itinerary) return null;
+    return savedItems.journeys.find((j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)) ?? null;
+  }, [itinerary, savedItems.journeys]);
 
   if (!itinerary) {
     return (
@@ -48,9 +60,7 @@ export function DirectionsSteps({
     );
   }
 
-  const isSaved = savedItems.journeys.some(
-    (j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)
-  );
+  const isSaved = !!matchingSavedJourney;
 
   // Get destination name: prefer activeDestination, fall back to last leg's end stop name
   const destinationName = activeDestination?.name
@@ -85,39 +95,63 @@ export function DirectionsSteps({
                     {formatDistance(itinerary.totalDistanceMeters)} total
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requireAuth(async () => {
-                      const button = e.currentTarget;
-                      button.disabled = true;
+                <div className="flex items-center gap-2">
+                  {matchingSavedJourney && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const shareUrl = `${window.location.origin}/journey/${matchingSavedJourney.id}`;
+                        const message = `View my Journey on Lokal! ETA to ${destinationName} is ${formatShareMinutes(itinerary.totalDurationMinutes)}. ${shareUrl}`;
 
-                      try {
-                        if (isSaved) {
-                          const journeyToRemove = savedItems.journeys.find(
-                            (j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)
-                          );
-                          if (journeyToRemove) {
-                            await savedItems.remove(journeyToRemove.id);
+                        try {
+                          if (navigator.clipboard?.writeText) {
+                            await navigator.clipboard.writeText(message);
+                            setShareSuccess(true);
+                            setTimeout(() => setShareSuccess(false), 2000);
+                          } else {
+                            throw new Error("Clipboard API unavailable");
                           }
-                        } else {
-                          onOpenSaveDialog();
+                        } catch (error) {
+                          console.error("Failed to copy journey share link", error);
+                          alert("Unable to copy share link. Please copy it manually: " + shareUrl);
                         }
-                      } finally {
-                        button.disabled = false;
-                      }
-                    });
-                  }}
-                  aria-label={isSaved ? "Remove from saved" : "Save journey"}
-                  className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isSaved
-                      ? "bg-blue-600 border-blue-600 text-white"
-                      : "bg-white border-blue-300 text-blue-600 hover:bg-blue-100"
-                  }`}
-                >
-                  <Bookmark className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} />
-                </button>
+                      }}
+                      aria-label="Share journey"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-purple-200 bg-white px-4 text-sm font-medium text-purple-700 transition-colors hover:bg-purple-50"
+                    >
+                      <Share2 className="h-4 w-4" />
+                      {shareSuccess ? "Copied!" : "Share"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requireAuth(async () => {
+                        const button = e.currentTarget;
+                        button.disabled = true;
+
+                        try {
+                          if (isSaved && matchingSavedJourney) {
+                            await savedItems.remove(matchingSavedJourney.id);
+                          } else {
+                            onOpenSaveDialog();
+                          }
+                        } finally {
+                          button.disabled = false;
+                        }
+                      });
+                    }}
+                    aria-label={isSaved ? "Remove from saved" : "Save journey"}
+                    className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isSaved
+                        ? "bg-blue-600 border-blue-600 text-white"
+                        : "bg-white border-blue-300 text-blue-600 hover:bg-blue-100"
+                    }`}
+                  >
+                    <Bookmark className="h-5 w-5" fill={isSaved ? "currentColor" : "none"} />
+                  </button>
+                </div>
               </div>
             </div>
 
