@@ -25,7 +25,7 @@ export function RoutesList({
   selectedRouteId,
   vehiclesByRoute,
   onSelectRoute,
-  requireAuth,
+  requireAuth: _requireAuth,
 }: RoutesListProps) {
   const [routeQuery, setRouteQuery] = useState("");
 
@@ -90,7 +90,8 @@ export function RoutesList({
                 ))
               ) : (
                 filteredRoutes.map((route) => {
-                const color = `#${(route.Color ?? "").trim()}`;
+                const colorValue = (route.Color ?? "").trim();
+                const color = colorValue ? `#${colorValue}` : "#2563eb";
                 const subtitle = route.Description && route.Description.length > 0 ? route.Description : "";
                 const isActive = route.RouteId === selectedRouteId;
                 const vehicleCount = vehiclesByRoute.get(route.RouteId) ?? 0;
@@ -111,10 +112,10 @@ export function RoutesList({
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
                         <div className="min-w-0">
                           <div className="truncate text-xs sm:text-sm text-muted-foreground">
-                            {subtitle || route.LongName}
+                            {subtitle}
                           </div>
                           <div className="mt-1 truncate text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
-                            {route.LongName || route.ShortName}
+                            {route.LongName}
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">{statusText}</div>
                         </div>
@@ -123,9 +124,9 @@ export function RoutesList({
                             className="block text-3xl sm:text-4xl md:text-5xl font-extrabold leading-none tracking-tighter tabular-nums"
                             style={{ color }}
                           >
-                            {route.ShortName.includes("Route ")
-                              ? route.ShortName.split("Route ")[1]
-                              : route.ShortName}
+                            {route.ShortName?.includes("Route ")
+                              ? route.ShortName.split("Route ")[1] ?? route.ShortName
+                              : route.ShortName ?? ""}
                           </span>
                         </div>
                       </div>

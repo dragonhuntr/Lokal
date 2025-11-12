@@ -235,13 +235,13 @@ function haversineDistance(
   const lat1 = toRadians(a.lat);
   const lat2 = toRadians(b.lat);
 
-  const a_calc =
+  const haversineA =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1) *
       Math.cos(lat2) *
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a_calc), Math.sqrt(1 - a_calc));
+  const c = 2 * Math.atan2(Math.sqrt(haversineA), Math.sqrt(1 - haversineA));
 
   return R * c;
 }

@@ -63,8 +63,9 @@ export function DirectionsSteps({
   const isSaved = !!matchingSavedJourney;
 
   // Get destination name: prefer activeDestination, fall back to last leg's end stop name
+  const lastLeg = itinerary.legs.length > 0 ? itinerary.legs[itinerary.legs.length - 1] : null;
   const destinationName = activeDestination?.name
-    ?? itinerary.legs[itinerary.legs.length - 1]?.end?.stopName
+    ?? lastLeg?.endStopName
     ?? "Your destination";
 
   return (

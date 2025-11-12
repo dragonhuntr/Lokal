@@ -20,25 +20,40 @@ if (env.NODE_ENV !== "production") globalForPrisma.prisma = db;
 
 // Graceful shutdown to close database connections properly
 // Prevents connection leaks and ensures clean shutdown
+let shutdownInProgress = false;
+
 if (typeof process !== 'undefined') {
-  const shutdown = async (signal: string) => {
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shutdownInProgress) {
+      console.log('Shutdown already in progress, skipping...');
+      return;
+    }
+
+    shutdownInProgress = true;
     console.log(`${signal} received, closing database connections...`);
-    await db.$disconnect();
-    console.log('Database connections closed');
+
+    try {
+      await Promise.race([
+        db.$disconnect(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Database disconnect timeout')), 10000)
+        )
+      ]);
+      console.log('Database connections closed successfully');
+    } catch (error) {
+      console.error('Error during database disconnect:', error);
+    } finally {
+      process.exit(signal === 'SIGINT' ? 0 : 1);
+    }
   };
 
-  process.on('SIGINT', async () => {
-    await shutdown('SIGINT');
-    process.exit(0);
-  });
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-  process.on('SIGTERM', async () => {
-    await shutdown('SIGTERM');
-    process.exit(0);
-  });
-
-  process.on('beforeExit', async () => {
-    await db.$disconnect();
+  process.once('beforeExit', (code) => {
+    if (!shutdownInProgress && code === 0) {
+      void db.$disconnect().catch(console.error);
+    }
   });
 }
 

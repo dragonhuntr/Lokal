@@ -4,7 +4,6 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { BusFront, Footprints } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
 
-import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface ItineraryOptionsProps {
@@ -128,7 +127,7 @@ export function ItineraryOptions({
                           style={{ color: itinerary.routeColor ? `#${itinerary.routeColor}` : "#2563eb" }}
                         >
                           {itinerary.routeNumber.includes("Route ")
-                            ? itinerary.routeNumber.split("Route ")[1]
+                            ? itinerary.routeNumber.split("Route ")[1] ?? itinerary.routeNumber
                             : itinerary.routeNumber}
                         </span>
                       </div>

@@ -179,7 +179,7 @@ export default function Home() {
             const routesResponse = await fetch("/api/routes");
             if (routesResponse.ok) {
               const routesData = (await routesResponse.json()) as { routes: RouteSummary[] };
-              const route = routesData.routes.find((r) => r.RouteId.toString() === data.item.routeId);
+              const route = routesData.routes.find((r) => r.RouteId === Number(data.item.routeId));
               if (route) {
                 setSelectedRoute(route);
                 setPlanItineraries(null);
@@ -195,7 +195,9 @@ export default function Home() {
       }
     };
 
-    void loadItem();
+    loadItem().catch((error) => {
+      console.error("Failed to load saved item:", error);
+    });
   }, [searchParams, session.status, session.user?.id]);
 
   // Handle shared journey from URL parameter (public access)
@@ -240,26 +242,42 @@ export default function Home() {
   useEffect(() => {
     if (!("geolocation" in navigator)) {
       console.warn("Geolocation not supported in this browser");
-      return;
+      return undefined;
     }
 
-    const watcherId = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserLocation({ latitude, longitude });
-      },
-      (error) => {
-        console.error("Unable to retrieve current position", error);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 1000,
-      }
-    );
+    let watcherId: number | null = null;
+    let errorCount = 0;
+    const MAX_ERRORS = 3;
+
+    const startWatching = () => {
+      watcherId = navigator.geolocation.watchPosition(
+        (position) => {
+          errorCount = 0;
+          const { latitude, longitude } = position.coords;
+          setUserLocation({ latitude, longitude });
+        },
+        (error) => {
+          errorCount++;
+          console.error(`Geolocation error (${errorCount}/${MAX_ERRORS}):`, error);
+
+          if (errorCount >= MAX_ERRORS && watcherId !== null) {
+            navigator.geolocation.clearWatch(watcherId);
+            watcherId = null;
+            console.error("Geolocation disabled due to repeated errors");
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 1000,
+        }
+      );
+    };
+
+    startWatching();
 
     return () => {
-      if (typeof watcherId === "number") {
+      if (watcherId !== null) {
         navigator.geolocation.clearWatch(watcherId);
       }
     };
@@ -281,9 +299,11 @@ export default function Home() {
     }
 
     const controller = new AbortController();
+    let isActive = true;
 
     const plan = async () => {
       try {
+        if (!isActive) return;
         setPlanStatus("loading");
         setPlanError(null);
 
@@ -303,6 +323,8 @@ export default function Home() {
           signal: controller.signal,
         });
 
+        if (!isActive || controller.signal.aborted) return;
+
         if (!response.ok) {
           const errorPayload = (await response.json().catch(() => null)) as unknown;
           const errorMessage =
@@ -316,13 +338,17 @@ export default function Home() {
         }
 
         const rawData = (await response.json()) as unknown;
+
+        if (!isActive || controller.signal.aborted) return;
+
         const parsedItineraries = extractPlanItineraries(rawData);
         setPlanItineraries(parsedItineraries);
         setPlanStatus("success");
         setPlanError(null);
         setSelectedItineraryIndex(0);
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (!isActive || controller.signal.aborted) return;
+
         console.error("Failed to plan itinerary", error);
         setPlanStatus("error");
         const errorMessage = error instanceof Error
@@ -333,9 +359,16 @@ export default function Home() {
       }
     };
 
-    void plan();
+    plan().catch((error) => {
+      console.error("Failed to plan journey:", error);
+      if (isActive && !controller.signal.aborted) {
+        setPlanStatus("error");
+        setPlanError("Failed to calculate route. Please try again.");
+      }
+    });
 
     return () => {
+      isActive = false;
       controller.abort();
     };
   }, [journeyStops, effectiveOrigin]);

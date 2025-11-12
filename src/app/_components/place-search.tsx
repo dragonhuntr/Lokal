@@ -223,7 +223,7 @@ export function PlaceSearch({
                   : journeyStopIds.has(place.mapboxId);
                 const isFinalStop = Boolean(
                   finalStopId &&
-                    ((identifiedLocation && identifiedLocation.id === finalStopId) ??
+                    ((identifiedLocation?.id === finalStopId) ||
                       place.mapboxId === finalStopId)
                 );
                 const highlightClass = isFinalStop

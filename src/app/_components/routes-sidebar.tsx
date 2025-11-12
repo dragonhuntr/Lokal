@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowLeft, Bookmark, Bus, MapPin, Menu, X, Calendar, Navigation, Trash2 } from "lucide-react";
+import { ArrowLeft, Bookmark, Bus, MapPin, Menu, X } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
@@ -722,9 +722,9 @@ export function RoutesSidebar({
         open={saveJourneyOpen}
         onOpenChange={setSaveJourneyOpen}
         itinerary={itineraries?.[selectedItineraryIndex] ?? null}
-        originLat={userLocation?.latitude ?? 0}
-        originLng={userLocation?.longitude ?? 0}
-        defaultNickname={activeDestination?.name ?? activeDestination?.placeName}
+        originLat={userLocation?.latitude ?? null}
+        originLng={userLocation?.longitude ?? null}
+        defaultNickname={activeDestination?.name ?? activeDestination?.placeName ?? "My Journey"}
       />
     </div>
   );

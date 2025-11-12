@@ -67,6 +67,8 @@ const WALKING_SPEED_MPS = 1.4; // ~5 km/h
 const BUS_SPEED_MPS = 8.33; // ~30 km/h average urban speed
 const BUS_DWELL_SECONDS = 30;
 const DEFAULT_MAX_WALK_METERS = 1000;
+const DEFAULT_ROUTE_COLOR = '2563eb'; // Blue
+const WALKING_COLOR = '6b7280'; // Gray
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
@@ -392,17 +394,25 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
 
     // Add colors to itineraries
     itineraries.forEach((itinerary) => {
-      if (itinerary.routeNumber) {
-        itinerary.routeColor = routeColorMap.get(itinerary.routeNumber) ||
-                               routeColorMap.get(itinerary.routeName || "") ||
-                               undefined;
+      if (itinerary.routeNumber && itinerary.routeNumber !== 'Walk') {
+        itinerary.routeColor =
+          routeColorMap.get(itinerary.routeNumber) ??
+          routeColorMap.get(itinerary.routeName ?? "") ??
+          DEFAULT_ROUTE_COLOR;
+      } else if (itinerary.routeNumber === 'Walk') {
+        itinerary.routeColor = WALKING_COLOR;
+      } else {
+        itinerary.routeColor = DEFAULT_ROUTE_COLOR;
       }
-      // Also add colors to bus legs
+
       itinerary.legs.forEach((leg) => {
         if (leg.type === "bus" && leg.routeNumber) {
-          leg.routeColor = routeColorMap.get(leg.routeNumber) ||
-                          routeColorMap.get(leg.routeName || "") ||
-                          undefined;
+          leg.routeColor =
+            routeColorMap.get(leg.routeNumber) ??
+            routeColorMap.get(leg.routeName ?? "") ??
+            DEFAULT_ROUTE_COLOR;
+        } else if (leg.type === "walk") {
+          leg.routeColor = WALKING_COLOR;
         }
       });
     });
@@ -464,11 +474,13 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
       : entry.firstSegment?.routeName;
 
     const routeNumber = isMultiSegment ? undefined : entry.firstSegment?.routeNumber;
-    const routeColor = routeNumber
-      ? routeColorMap.get(routeNumber) ||
-        routeColorMap.get(routeName || "") ||
-        undefined
-      : undefined;
+    const routeColor = routeNumber && routeNumber !== 'Walk'
+      ? routeColorMap.get(routeNumber) ??
+        routeColorMap.get(routeName ?? "") ??
+        DEFAULT_ROUTE_COLOR
+      : routeNumber === 'Walk'
+      ? WALKING_COLOR
+      : DEFAULT_ROUTE_COLOR;
 
     return {
       legs: entry.legs,
@@ -487,9 +499,11 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
   itineraries.forEach((itinerary) => {
     itinerary.legs.forEach((leg) => {
       if (leg.type === "bus" && leg.routeNumber) {
-        leg.routeColor = routeColorMap.get(leg.routeNumber) ||
-                        routeColorMap.get(leg.routeName || "") ||
-                        undefined;
+        leg.routeColor = routeColorMap.get(leg.routeNumber) ??
+                        routeColorMap.get(leg.routeName ?? "") ??
+                        DEFAULT_ROUTE_COLOR;
+      } else if (leg.type === "walk") {
+        leg.routeColor = WALKING_COLOR;
       }
     });
   });
