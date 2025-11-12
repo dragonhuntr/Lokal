@@ -60,6 +60,8 @@ model SavedItem {
   itineraryData   Json?
   originLat       Float?
   originLng       Float?
+  destinationLat Float?
+  destinationLng Float?
   destinationName String?
   totalDistance   Int?
   totalDuration   Int?

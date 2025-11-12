@@ -33,6 +33,8 @@ export interface SavedJourneyItem extends SavedItemBase {
   itineraryData: PlanItinerary;
   originLat: number;
   originLng: number;
+  destinationLat: number;
+  destinationLng: number;
   destinationName: string | null;
   totalDistance: number;
   totalDuration: number;
@@ -61,6 +63,15 @@ export function useSavedItems() {
   const saveJourney = useCallback(
     async (itineraryData: PlanItinerary, originLat: number, originLng: number, nickname?: string, destinationName?: string) => {
       if (!user) throw new Error("Not authenticated");
+      
+      // Extract destination coordinates from the last leg's end point
+      const lastLeg = itineraryData.legs[itineraryData.legs.length - 1];
+      if (!lastLeg) {
+        throw new Error("Invalid itinerary: no legs found");
+      }
+      const destinationLat = lastLeg.end.latitude;
+      const destinationLng = lastLeg.end.longitude;
+      
       const res = await fetch(`/api/user/${encodeURIComponent(user.id)}/saved-items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -69,6 +80,8 @@ export function useSavedItems() {
           itineraryData,
           originLat,
           originLng,
+          destinationLat,
+          destinationLng,
           nickname,
           destinationName,
         }),
