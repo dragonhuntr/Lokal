@@ -140,7 +140,7 @@ export function RouteDetailView({
             });
           }}
           aria-label={isSaved ? "Remove saved route" : "Save route"}
-          className={`flex-shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+          className={`flex-shrink-0 inline-flex h-11 w-11 items-center justify-center rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             isSaved
               ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
               : "border-border/70 text-muted-foreground hover:bg-muted"

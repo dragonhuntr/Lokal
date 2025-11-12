@@ -286,7 +286,10 @@ export default function Home() {
         if (controller.signal.aborted) return;
         console.error("Failed to plan itinerary", error);
         setPlanStatus("error");
-        setPlanError(error instanceof Error ? error.message : "Failed to calculate directions");
+        const errorMessage = error instanceof Error
+          ? error.message
+          : "Failed to calculate directions. Please check your internet connection and try again.";
+        setPlanError(errorMessage);
         setPlanItineraries(null);
       }
     };

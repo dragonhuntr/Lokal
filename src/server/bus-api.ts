@@ -628,6 +628,26 @@ export const cleanup = () => {
   stopPolling();
 };
 
+// Register cleanup handlers for graceful shutdown
+// Prevents memory leaks by stopping polling when process terminates
+if (typeof process !== 'undefined') {
+  process.on('SIGINT', () => {
+    console.log('SIGINT received, cleaning up polling intervals...');
+    cleanup();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, cleaning up polling intervals...');
+    cleanup();
+    process.exit(0);
+  });
+
+  process.on('beforeExit', () => {
+    cleanup();
+  });
+}
+
 // function to format ETA
 export const formatETA = (etaLocalTime: string): string => {
   try {
@@ -677,26 +697,31 @@ export const fetchAllVehicles = async (): Promise<RouteDetails["Vehicles"]> => {
 
   try {
     const routes = await fetchRoutes();
-    const allVehicles: RouteDetails["Vehicles"] = [];
 
-    // Fetch vehicle data for all visible routes
-    for (const route of routes) {
+    // Parallelize vehicle fetching for all routes to avoid N+1 query problem
+    const vehiclePromises = routes.map(async (route) => {
       try {
         const routeDetails = await fetchRouteDetails(route.RouteId);
         if (routeDetails.Vehicles && routeDetails.Vehicles.length > 0) {
           // Filter out invalid coordinates
-          const validVehicles = routeDetails.Vehicles.filter(
+          return routeDetails.Vehicles.filter(
             (vehicle) =>
               Number.isFinite(vehicle.Latitude) &&
               Number.isFinite(vehicle.Longitude) &&
               (vehicle.Latitude !== 0 || vehicle.Longitude !== 0)
           );
-          allVehicles.push(...validVehicles);
         }
+        return [];
       } catch (error) {
         console.error(`Error fetching vehicles for route ${route.RouteId}:`, error);
+        // Return empty array for failed routes instead of breaking the whole operation
+        return [];
       }
-    }
+    });
+
+    // Wait for all parallel requests to complete
+    const vehicleArrays = await Promise.all(vehiclePromises);
+    const allVehicles: RouteDetails["Vehicles"] = vehicleArrays.flat();
 
     vehiclesCache = allVehicles;
     lastVehiclesFetchTime = Date.now();
