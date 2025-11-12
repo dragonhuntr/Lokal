@@ -21,6 +21,8 @@ import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
 import { useSavedItems } from "@/trpc/saved-items";
 import type { PlanItinerary } from "@/server/routing/service";
+import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 const RESULT_LIMIT = 10;
 const DEBOUNCE_MS = 300;
@@ -125,6 +127,7 @@ export function RoutesSidebar({
   onExitSavedJourneyView,
 }: RoutesSidebarProps) {
   const router = useRouter();
+  const isDesktop = useMediaQuery("(min-width: 640px)");
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<SidebarView>("routes");
   const [placeQuery, setPlaceQuery] = useState("");
@@ -143,6 +146,12 @@ export function RoutesSidebar({
   const savedItems = useSavedItems();
   const [savedItemsFilter, setSavedItemsFilter] = useState<"all" | "journeys" | "routes">("all");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isDesktop) {
+      setOpen(false);
+    }
+  }, [isDesktop]);
 
   const activeDestination = journeyStops.length
     ? journeyStops[journeyStops.length - 1]
@@ -456,126 +465,133 @@ export function RoutesSidebar({
   );
 
   return (
-    <div className="pointer-events-none absolute left-2 top-2 sm:left-4 sm:top-4 z-50">
+    <div
+      className={cn(
+        "pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4",
+        "sm:absolute sm:inset-auto sm:left-4 sm:top-4 sm:bottom-auto sm:right-auto sm:px-0 sm:justify-start"
+      )}
+    >
       <Dialog.Root open={open} onOpenChange={setOpen}>
         <Dialog.Trigger asChild>
           <button
-            className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-md bg-white/90 px-3 text-sm shadow-md backdrop-blur hover:bg-white"
+            className="pointer-events-auto inline-flex w-full max-w-sm items-center justify-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-semibold text-background shadow-lg transition hover:bg-foreground/90 focus:outline-2 focus:outline-offset-2 focus:outline-ring sm:h-11 sm:w-auto sm:max-w-none sm:rounded-md sm:bg-white/90 sm:px-3 sm:py-0 sm:text-sm sm:font-medium sm:text-foreground sm:shadow-md sm:hover:bg-white"
             aria-label="Toggle sidebar"
           >
             <Menu className="h-4 w-4" />
+            <span className="sm:hidden">Open transit</span>
             <span className="hidden sm:inline">Explore</span>
           </button>
         </Dialog.Trigger>
         <Dialog.Portal>
-          <Dialog.Content className="pointer-events-auto fixed inset-y-2 left-2 inset-x-2 sm:inset-y-4 sm:left-4 sm:inset-x-auto z-50 flex w-auto sm:min-w-[340px] sm:max-w-[420px] md:max-w-[600px] flex-col overflow-hidden rounded-lg border bg-background p-3 shadow-xl">
+          <Dialog.Overlay className="fixed inset-0 bg-background/60 backdrop-blur-sm sm:hidden" />
+          <Dialog.Content
+            className={cn(
+              "pointer-events-auto fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-3xl border bg-background p-4 shadow-xl focus:outline-none",
+              "sm:inset-auto sm:bottom-auto sm:left-4 sm:top-4 sm:max-h-[calc(100vh-2rem)] sm:w-auto sm:min-w-[340px] sm:max-w-[420px] sm:rounded-xl sm:border sm:p-3 md:max-w-[600px]"
+            )}
+          >
+            {!isDesktop && <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" aria-hidden />}
             <div className="mb-3 flex items-center justify-between">
               <Dialog.Title className="text-base font-semibold">Lokal Transit</Dialog.Title>
               <Dialog.Close asChild>
-                <button className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring" aria-label="Close sidebar">
+                <button
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/70 text-muted-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring sm:h-11 sm:w-11 sm:rounded-md sm:bg-transparent sm:text-foreground"
+                  aria-label="Close sidebar"
+                >
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
             </div>
 
-            {/* Mode Toggle */}
-            <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-1" role="tablist" aria-label="Application mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "explore"}
-                aria-controls="mode-panel"
-                onClick={() => onModeChange("explore")}
-                className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-                  mode === "explore" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Bus className="h-4 w-4" />
-                Explore
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "plan"}
-                aria-controls="mode-panel"
-                onClick={() => onModeChange("plan")}
-                className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-                  mode === "plan" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <MapPin className="h-4 w-4" />
-                Plan
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "saved"}
-                aria-controls="mode-panel"
-                onClick={() => onModeChange("saved")}
-                className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-                  mode === "saved" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Bookmark className="h-4 w-4" />
-                Saved
-              </button>
-            </div>
-
-            {/* View Headers */}
-            {view === "route-options" ? (
-              <div className="mb-3 flex items-center gap-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* Mode Toggle */}
+              <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-1" role="tablist" aria-label="Application mode">
                 <button
                   type="button"
-                  onClick={() => setView("places")}
-                  className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                  role="tab"
+                  aria-selected={mode === "explore"}
+                  aria-controls="mode-panel"
+                  onClick={() => onModeChange("explore")}
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
+                    mode === "explore" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to search
+                  <Bus className="h-4 w-4" />
+                  Explore
                 </button>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-foreground">
-                    {activeDestination?.name ?? "Suggested routes"}
-                  </div>
-                  {activeDestination?.placeName && (
-                    <div className="text-xs text-muted-foreground truncate">
-                      {activeDestination.placeName}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : view === "step-by-step" ? (
-              <div className="mb-3 flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setView("route-options")}
-                  className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                  role="tab"
+                  aria-selected={mode === "plan"}
+                  aria-controls="mode-panel"
+                  onClick={() => onModeChange("plan")}
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
+                    mode === "plan" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to routes
+                  <MapPin className="h-4 w-4" />
+                  Plan
                 </button>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-foreground">
-                    Step-by-step
-                  </div>
-                  {activeDestination?.name && (
-                    <div className="text-xs text-muted-foreground truncate">
-                      To {activeDestination.name}
-                    </div>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "saved"}
+                  aria-controls="mode-panel"
+                  onClick={() => onModeChange("saved")}
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
+                    mode === "saved" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Bookmark className="h-4 w-4" />
+                  Saved
+                </button>
               </div>
-            ) : mode === "explore" ? (
-              <div className="mb-2 text-xs font-medium text-muted-foreground px-1">
-                Browse bus lines and see active buses
-              </div>
-            ) : mode === "plan" ? (
-              <div className="mb-2 text-xs font-medium text-muted-foreground px-1">
-                Search for your destination
-              </div>
-            ) : null}
 
-            {/* Content Views */}
-            <div id="mode-panel" role="tabpanel">
+              {/* View Headers */}
+              {view === "route-options" ? (
+                <div className="mb-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setView("places")}
+                    className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to search
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-foreground">
+                      {activeDestination?.name ?? "Suggested routes"}
+                    </div>
+                    {activeDestination?.placeName && (
+                      <div className="truncate text-xs text-muted-foreground">{activeDestination.placeName}</div>
+                    )}
+                  </div>
+                </div>
+              ) : view === "step-by-step" ? (
+                <div className="mb-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setView("route-options")}
+                    className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to routes
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-foreground">Step-by-step</div>
+                    {activeDestination?.name && (
+                      <div className="truncate text-xs text-muted-foreground">To {activeDestination.name}</div>
+                    )}
+                  </div>
+                </div>
+              ) : mode === "explore" ? (
+                <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">Browse bus lines and see active buses</div>
+              ) : mode === "plan" ? (
+                <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">Search for your destination</div>
+              ) : null}
+
+              {/* Content Views */}
+              <div id="mode-panel" role="tabpanel" className="-mr-2 flex-1 overflow-y-auto pr-2">
             {mode === "explore" && view === "route-detail" && selectedRoute ? (
               <RouteDetailView
                 route={selectedRoute}
@@ -653,8 +669,8 @@ export function RoutesSidebar({
             ) : null}
             </div>
 
-            {/* Footer */}
-            <div className="border-t pt-3">
+              {/* Footer */}
+              <div className="mt-3 shrink-0 border-t pt-3">
               {session.status !== "authenticated" ? (
                 <div className="flex items-center justify-between gap-2">
                   <button
@@ -695,6 +711,7 @@ export function RoutesSidebar({
                   </div>
                 </div>
               )}
+              </div>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
