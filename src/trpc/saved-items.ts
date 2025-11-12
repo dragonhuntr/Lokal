@@ -33,6 +33,7 @@ export interface SavedJourneyItem extends SavedItemBase {
   itineraryData: PlanItinerary;
   originLat: number;
   originLng: number;
+  destinationName: string | null;
   totalDistance: number;
   totalDuration: number;
 }
@@ -58,7 +59,7 @@ export function useSavedItems() {
   });
 
   const saveJourney = useCallback(
-    async (itineraryData: PlanItinerary, originLat: number, originLng: number, nickname?: string) => {
+    async (itineraryData: PlanItinerary, originLat: number, originLng: number, nickname?: string, destinationName?: string) => {
       if (!user) throw new Error("Not authenticated");
       const res = await fetch(`/api/user/${encodeURIComponent(user.id)}/saved-items`, {
         method: "POST",
@@ -69,6 +70,7 @@ export function useSavedItems() {
           originLat,
           originLng,
           nickname,
+          destinationName,
         }),
         credentials: "include",
       });

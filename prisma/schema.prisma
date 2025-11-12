@@ -57,11 +57,12 @@ model SavedItem {
   routeId String?
 
   // For complex journeys (type: JOURNEY)
-  itineraryData Json?
-  originLat     Float?
-  originLng     Float?
-  totalDistance Int?
-  totalDuration Int?
+  itineraryData   Json?
+  originLat       Float?
+  originLng       Float?
+  destinationName String?
+  totalDistance   Int?
+  totalDuration   Int?
 
   lastViewed DateTime?
   createdAt  DateTime  @default(now())
