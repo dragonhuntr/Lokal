@@ -543,7 +543,9 @@ export function RoutesSidebar({
           >
             {!isDesktop && <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" aria-hidden />}
             <div className="mb-3 flex items-center justify-between">
-              <Dialog.Title className="text-base font-semibold">Lokal Transit</Dialog.Title>
+              <Dialog.Title className="flex items-center">
+                <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
+              </Dialog.Title>
               <Dialog.Close asChild>
                 <button
                   className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/70 text-muted-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring sm:h-11 sm:w-11 sm:rounded-md sm:bg-transparent sm:text-foreground"
