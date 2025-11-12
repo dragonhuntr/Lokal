@@ -365,8 +365,48 @@ export function MapboxMap({
         duration: 900,
         essential: true,
       });
+      return;
     }
-  }, [mapLoaded, selectedRoute, selectedLocation, navigationRoute, routeGeoJson, journeyStopList]);
+
+    // Reset view when no route is selected and no other visualization is active
+    // Match the initial page load behavior: center on user location if available, otherwise use default view
+    if (
+      !selectedRoute &&
+      !selectedItinerary &&
+      !navigationRoute?.features?.length &&
+      !journeyStopList.length &&
+      !selectedLocation
+    ) {
+      if (userLocation) {
+        // Match initial load: center on user location with zoom at least 16, preserving pitch and bearing
+        // Same logic as initial page load: Math.max(prev.zoom, 16) where prev.zoom is DEFAULT_VIEW.zoom (15)
+        mapInstance.flyTo({
+          center: [userLocation.longitude, userLocation.latitude],
+          zoom: Math.max(DEFAULT_VIEW.zoom, 16),
+          pitch: DEFAULT_VIEW.pitch,
+          bearing: DEFAULT_VIEW.bearing,
+          duration: 900,
+          essential: true,
+        });
+      } else {
+        // Reset to default view (initial page load state)
+        mapInstance.flyTo({
+          ...DEFAULT_VIEW,
+          duration: 900,
+          essential: true,
+        });
+      }
+    }
+  }, [
+    mapLoaded,
+    selectedRoute,
+    selectedLocation,
+    navigationRoute,
+    routeGeoJson,
+    journeyStopList,
+    selectedItinerary,
+    userLocation,
+  ]);
 
   const navigationLineLayer = useMemo<LayerProps>(
     () => ({
