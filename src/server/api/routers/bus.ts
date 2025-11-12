@@ -52,4 +52,25 @@ export const busRouter = createTRPCRouter({
     .query(async () => {
       return await fetchAllVehicles();
     }),
+
+  // Prefetch route details for multiple routes (background prefetching)
+  prefetchRouteDetails: publicProcedure
+    .input(z.object({ routeIds: z.array(z.number()) }))
+    .mutation(async ({ input }) => {
+      // Prefetch route details in parallel
+      // This warms up the Redis cache for faster subsequent requests
+      const prefetchPromises = input.routeIds.map((routeId) =>
+        fetchRouteDetails(routeId).catch((error) => {
+          // Silently fail for individual routes to not block others
+          console.warn(`Failed to prefetch route ${routeId}:`, error);
+          return null;
+        })
+      );
+      
+      // Wait for all prefetches to complete to ensure cache is populated
+      // This ensures routes are cached before the mutation returns
+      await Promise.allSettled(prefetchPromises);
+      
+      return { success: true, count: input.routeIds.length };
+    }),
 });

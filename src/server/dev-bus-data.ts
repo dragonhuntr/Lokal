@@ -116,3 +116,22 @@ function getRandomOccupancy(): string {
 export function isDevMode(): boolean {
   return process.env.NODE_ENV === "development";
 }
+
+/**
+ * Check if fake buses should be generated
+ * Can be disabled by setting ENABLE_FAKE_BUSES=false even in development mode
+ */
+export function shouldUseFakeBuses(): boolean {
+  if (process.env.NODE_ENV !== "development") {
+    return false;
+  }
+  
+  // Allow explicit override via environment variable
+  const enableFakeBuses = process.env.ENABLE_FAKE_BUSES;
+  if (enableFakeBuses !== undefined) {
+    return enableFakeBuses.toLowerCase() === "true";
+  }
+  
+  // Default to true in development mode
+  return true;
+}
