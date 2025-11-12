@@ -2,11 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Marker, Source, type LayerProps, type MapRef } from "react-map-gl/mapbox";
-import type {
-  ColorSpecification,
-  DataDrivenPropertyValueSpecification,
-  ExpressionSpecification,
-} from "mapbox-gl";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { env } from "@/env";
@@ -14,8 +9,7 @@ import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import type { LocationSearchResult } from "./routes-sidebar";
 import { BusInfoPopup } from "./bus-info-popup";
-import type { RouteDetails, RouteCoordinate } from "@/server/bus-api";
-import { createBus3DLayer } from "./bus-3d-layer";
+import type { RouteDetails } from "@/server/bus-api";
 import type { PlanItinerary } from "@/server/routing/service";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
@@ -64,9 +58,6 @@ const DEFAULT_VIEW = {
 const ROUTE_SOURCE_ID = "selected-route";
 const ROUTE_OUTLINE_LAYER_ID = "selected-route-outline";
 const ROUTE_LINE_LAYER_ID = "selected-route-line";
-const BUS_SOURCE_ID = "bus-positions";
-const BUS_LAYER_ID = "bus-3d-layer";
-const BUS_MODEL_SCALE: [number, number, number] = [18, 18, 18];
 
 const NAVIGATION_SOURCE_ID = "navigation-route";
 const NAVIGATION_LINE_LAYER_ID = "navigation-route-line";
@@ -98,7 +89,10 @@ export function MapboxMap({
   const hasCenteredUserRef = useRef(false);
   const mapRef = useRef<MapRef | null>(null);
   const bus3DLayerRef = useRef<mapboxgl.CustomLayerInterface | null>(null);
-  const journeyStopList = Array.isArray(journeyStopsProp) ? journeyStopsProp : [];
+  const journeyStopList = useMemo(
+    () => (Array.isArray(journeyStopsProp) ? journeyStopsProp : []),
+    [journeyStopsProp]
+  );
 
   const routeId = selectedRoute?.RouteId;
 
@@ -114,7 +108,7 @@ export function MapboxMap({
     { routeId: routeId ?? 0 },
     {
       enabled: routeId !== undefined && routeId !== null,
-      refetchInterval: 10_000,
+      refetchInterval: 30_000, // 30 seconds - better for battery and bandwidth
       select: (data) => ({
         ...data,
         Vehicles: data.Vehicles?.filter(
@@ -171,31 +165,6 @@ export function MapboxMap({
     };
   }, [routeShape]);
 
-  const busGeoJson = useMemo(() => {
-    if (!routeDetails?.Vehicles?.length) return null;
-
-    const features = routeDetails.Vehicles.map((vehicle) => ({
-      type: "Feature" as const,
-      id: `vehicle-${vehicle.VehicleId}`,
-      properties: {
-        vehicleId: vehicle.VehicleId,
-        name: vehicle.Name,
-        rotation: [0, 0, vehicle.Heading ?? 0] as [number, number, number],
-        scale: BUS_MODEL_SCALE,
-        translation: [0, 0, 0] as [number, number, number],
-        color: routeColor,
-      },
-      geometry: {
-        type: "Point" as const,
-        coordinates: [vehicle.Longitude, vehicle.Latitude],
-      },
-    }));
-
-    return {
-      type: "FeatureCollection" as const,
-      features,
-    };
-  }, [routeDetails?.Vehicles, routeColor]);
 
   const routeOutlineLayer: LayerProps = useMemo(
     () => ({
@@ -234,30 +203,9 @@ export function MapboxMap({
   );
 
 
-  const handleMapClick = useCallback(
-    (event: mapboxgl.MapLayerMouseEvent) => {
-      const mapInstance = mapRef.current?.getMap();
-      if (!mapInstance) return;
-
-      // Check if we clicked on the bus layer
-      const features = mapInstance.queryRenderedFeatures(event.point, {
-        layers: [BUS_LAYER_ID],
-      });
-
-      if (features && features.length > 0) {
-        const feature = features[0];
-        const vehicleId = feature?.properties?.vehicleId as number | undefined;
-
-        if (vehicleId && routeDetails?.Vehicles) {
-          const vehicle = routeDetails.Vehicles.find((v) => v.VehicleId === vehicleId);
-          if (vehicle) {
-            setSelectedVehicle(vehicle);
-          }
-        }
-      }
-    },
-    [routeDetails?.Vehicles]
-  );
+  const handleMapClick = useCallback(() => {
+    // Map click handler - currently unused but kept for future features
+  }, []);
 
   // Click handler for 3D bus models
   useEffect(() => {
