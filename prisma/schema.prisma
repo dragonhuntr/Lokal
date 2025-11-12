@@ -11,13 +11,13 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String?
+  id                   String   @id @default(cuid())
+  email                String   @unique
+  password             String
+  name                 String?
   notificationsEnabled Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   savedItems SavedItem[]
 }
@@ -43,6 +43,8 @@ model Stop {
   sequence  Int
   routeId   String
   route     Route  @relation(fields: [routeId], references: [id])
+
+  @@index([routeId])
 }
 
 model SavedItem {
@@ -65,6 +67,9 @@ model SavedItem {
   createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([userId, type])
 }
 
 enum ItemType {

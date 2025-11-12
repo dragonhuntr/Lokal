@@ -30,7 +30,17 @@ export async function GET(_request: NextRequest) {
       })),
     }));
 
-    return NextResponse.json({ routes: payload }, { status: 200 });
+    // Add cache headers for 5 minutes
+    // Routes data rarely changes, so caching improves performance
+    return NextResponse.json(
+      { routes: payload },
+      {
+        status: 200,
+        headers: {
+          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      }
+    );
   } catch (error) {
     console.error("Failed to load routes from database", error);
     return NextResponse.json({ error: "Failed to load routes" }, { status: 500 });

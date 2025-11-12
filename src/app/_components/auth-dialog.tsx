@@ -18,7 +18,36 @@ export function AuthDialog({ open, onOpenChange, defaultMode = "signin" }: AuthD
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [emailValid, setEmailValid] = useState<boolean | null>(null);
+  const [passwordValid, setPasswordValid] = useState<boolean | null>(null);
   const session = useSession();
+
+  const validateEmail = (value: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(value);
+  };
+
+  const validatePassword = (value: string) => {
+    return value.length >= 8;
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    if (value.length > 0) {
+      setEmailValid(validateEmail(value));
+    } else {
+      setEmailValid(null);
+    }
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    if (value.length > 0) {
+      setPasswordValid(validatePassword(value));
+    } else {
+      setPasswordValid(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,21 +71,24 @@ export function AuthDialog({ open, onOpenChange, defaultMode = "signin" }: AuthD
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl">
           <div className="mb-3 flex items-center justify-between">
             <Dialog.Title className="text-base font-semibold">
               {mode === "signin" ? "Sign in" : "Create account"}
             </Dialog.Title>
             <Dialog.Close asChild>
-              <button className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted" aria-label="Close">
+              <button className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-muted" aria-label="Close">
                 <X className="h-4 w-4" />
               </button>
             </Dialog.Close>
           </div>
 
-          <div className="mb-3 grid grid-cols-2 gap-1 rounded-md bg-muted/40 p-1">
+          <div className="mb-3 grid grid-cols-2 gap-1 rounded-md bg-muted/40 p-1" role="tablist" aria-label="Authentication mode">
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === "signin"}
+              aria-controls="auth-form-panel"
               onClick={() => setMode("signin")}
               className={`rounded-md px-3 py-1.5 text-sm ${mode === "signin" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
@@ -64,6 +96,9 @@ export function AuthDialog({ open, onOpenChange, defaultMode = "signin" }: AuthD
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === "signup"}
+              aria-controls="auth-form-panel"
               onClick={() => setMode("signup")}
               className={`rounded-md px-3 py-1.5 text-sm ${mode === "signup" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
@@ -71,44 +106,71 @@ export function AuthDialog({ open, onOpenChange, defaultMode = "signin" }: AuthD
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form id="auth-form-panel" role="tabpanel" onSubmit={handleSubmit} className="space-y-3">
             {mode === "signup" && (
               <div className="space-y-1">
-                <label className="text-xs font-medium">Name</label>
+                <label htmlFor="name" className="text-xs font-medium">Name</label>
                 <input
+                  id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Your name"
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none"
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ring"
                 />
               </div>
             )}
 
             <div className="space-y-1">
-              <label className="text-xs font-medium">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none"
-              />
+              <label htmlFor="email" className="text-xs font-medium">Email</label>
+              <div className="relative">
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  aria-describedby={error ? "auth-error" : undefined}
+                  aria-invalid={emailValid === false ? "true" : "false"}
+                  className={`h-9 w-full rounded-md border bg-background px-3 pr-8 text-sm outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
+                    emailValid === true ? "border-green-500" : emailValid === false ? "border-red-500" : ""
+                  }`}
+                />
+                {emailValid === true && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600 text-sm" aria-label="Valid email">✓</span>
+                )}
+              </div>
+              {emailValid === false && (
+                <p className="text-xs text-red-600">Please enter a valid email address</p>
+              )}
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none"
-              />
+              <label htmlFor="password" className="text-xs font-medium">Password</label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => handlePasswordChange(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  aria-describedby={error ? "auth-error" : undefined}
+                  aria-invalid={passwordValid === false ? "true" : "false"}
+                  className={`h-9 w-full rounded-md border bg-background px-3 pr-8 text-sm outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
+                    passwordValid === true ? "border-green-500" : passwordValid === false ? "border-red-500" : ""
+                  }`}
+                />
+                {passwordValid === true && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600 text-sm" aria-label="Valid password">✓</span>
+                )}
+              </div>
+              {passwordValid === false && mode === "signup" && (
+                <p className="text-xs text-red-600">Password must be at least 8 characters</p>
+              )}
             </div>
 
-            {error && <div className="text-xs text-red-600">{error}</div>}
+            {error && <div id="auth-error" role="alert" className="text-xs text-red-600">{error}</div>}
 
             <button
               type="submit"

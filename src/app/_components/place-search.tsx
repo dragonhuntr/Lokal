@@ -5,6 +5,9 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { MapPin, Search, X } from "lucide-react";
 import type { LocationSearchResult } from "./routes-sidebar";
 
+import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
+
 interface PlaceResult {
   mapboxId: string;
   name: string;
@@ -116,10 +119,15 @@ export function PlaceSearch({
       <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
         <Search className="h-4 w-4 opacity-60" />
         <input
+          type="search"
           value={placeQuery}
           onChange={(event) => onPlaceQueryChange(event.target.value)}
           placeholder="Search locations or buildings…"
-          className="h-9 w-full bg-transparent text-sm outline-none"
+          className="h-11 w-full bg-transparent text-sm outline-none"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck="false"
         />
       </div>
 
@@ -170,9 +178,7 @@ export function PlaceSearch({
       )}
 
       <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
-        {isLoading && (
-          <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-        )}
+        {isLoading && <Spinner size="sm" className="text-blue-600" />}
         <span>{statusMessage}</span>
       </div>
 
@@ -180,7 +186,20 @@ export function PlaceSearch({
         <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
           <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
             <ul className="space-y-2 p-2 pr-3">
-              {placesWithDistance.map((place) => {
+              {isLoading ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <li key={index}>
+                    <div className="w-full rounded-2xl border bg-card px-4 py-4">
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-2/3" />
+                        <Skeleton className="h-7 w-full" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
+                    </div>
+                  </li>
+                ))
+              ) : (
+                placesWithDistance.map((place) => {
                 const identifiedLocation = place.location;
                 const summaryContext = place.context.join(" • ");
                 const subtitle =
@@ -225,10 +244,10 @@ export function PlaceSearch({
                     >
                       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-sm text-muted-foreground">
+                          <div className="truncate text-xs sm:text-sm text-muted-foreground">
                             {subtitle}
                           </div>
-                          <div className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
+                          <div className="mt-1 truncate text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
                             {place.name}
                           </div>
                           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
@@ -241,7 +260,8 @@ export function PlaceSearch({
                     </button>
                   </li>
                 );
-              })}
+              })
+              )}
             </ul>
           </ScrollArea.Viewport>
           <ScrollArea.Scrollbar orientation="vertical">

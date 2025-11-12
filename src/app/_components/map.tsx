@@ -312,8 +312,11 @@ export function MapboxMap({
       }
 
       if (!bounds.isEmpty()) {
+        const isMobile = window.innerWidth < 640;
         mapInstance.fitBounds(bounds, {
-          padding: { top: 80, bottom: 80, left: 120, right: 120 },
+          padding: isMobile
+            ? { top: 40, bottom: 40, left: 60, right: 60 }
+            : { top: 80, bottom: 80, left: 120, right: 120 },
           maxZoom: 17,
           duration: 900,
         });
@@ -592,8 +595,11 @@ export function MapboxMap({
     }
 
     if (!bounds.isEmpty()) {
+      const isMobile = window.innerWidth < 640;
       mapInstance.fitBounds(bounds, {
-        padding: { top: 80, bottom: 80, left: 120, right: 120 },
+        padding: isMobile
+          ? { top: 40, bottom: 40, left: 60, right: 60 }
+          : { top: 80, bottom: 80, left: 120, right: 120 },
         maxZoom: 16,
         duration: 900,
       });

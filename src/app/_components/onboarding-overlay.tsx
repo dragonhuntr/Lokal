@@ -66,7 +66,7 @@ export function OnboardingOverlay() {
         <Dialog.Content className="fixed left-1/2 top-1/2 z-[101] w-[min(90vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-2xl">
           <button
             onClick={handleSkip}
-            className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
+            className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-muted"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

@@ -5,6 +5,9 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { Search } from "lucide-react";
 import type { RouterOutputs } from "@/trpc/react";
 
+import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
+
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 
 interface RoutesListProps {
@@ -49,17 +52,20 @@ export function RoutesList({
       <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
         <Search className="h-4 w-4 opacity-60" />
         <input
+          type="search"
           value={routeQuery}
           onChange={(event) => setRouteQuery(event.target.value)}
           placeholder="Search bus lines…"
-          className="h-9 w-full bg-transparent text-sm outline-none"
+          className="h-11 w-full bg-transparent text-sm outline-none"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck="false"
         />
       </div>
 
       <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
-        {isLoading && (
-          <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-        )}
+        {isLoading && <Spinner size="sm" className="text-blue-600" />}
         <span>{statusMessage}</span>
       </div>
 
@@ -67,7 +73,23 @@ export function RoutesList({
         <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
           <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
             <ul className="space-y-2 p-2 pr-3">
-              {filteredRoutes.map((route) => {
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <li key={index}>
+                    <div className="w-full rounded-2xl border bg-card px-4 py-4">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+                        <div className="min-w-0 space-y-2">
+                          <Skeleton className="h-4 w-3/4" />
+                          <Skeleton className="h-7 w-full" />
+                          <Skeleton className="h-3 w-1/2" />
+                        </div>
+                        <Skeleton className="h-12 w-12 rounded-md" />
+                      </div>
+                    </div>
+                  </li>
+                ))
+              ) : (
+                filteredRoutes.map((route) => {
                 const color = `#${(route.Color ?? "").trim()}`;
                 const subtitle = route.Description && route.Description.length > 0 ? route.Description : "";
                 const isActive = route.RouteId === selectedRouteId;
@@ -88,17 +110,17 @@ export function RoutesList({
                     >
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
                         <div className="min-w-0">
-                          <div className="truncate text-sm text-muted-foreground">
+                          <div className="truncate text-xs sm:text-sm text-muted-foreground">
                             {subtitle || route.LongName}
                           </div>
-                          <div className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
+                          <div className="mt-1 truncate text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
                             {route.LongName || route.ShortName}
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">{statusText}</div>
                         </div>
                         <div className="text-right">
                           <span
-                            className="block text-5xl font-extrabold leading-none tracking-tighter tabular-nums"
+                            className="block text-3xl sm:text-4xl md:text-5xl font-extrabold leading-none tracking-tighter tabular-nums"
                             style={{ color }}
                           >
                             {route.ShortName.includes("Route ")
@@ -110,7 +132,8 @@ export function RoutesList({
                     </button>
                   </li>
                 );
-              })}
+              })
+              )}
             </ul>
           </ScrollArea.Viewport>
           <ScrollArea.Scrollbar orientation="vertical">

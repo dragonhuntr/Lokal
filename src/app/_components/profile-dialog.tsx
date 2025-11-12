@@ -59,11 +59,11 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl">
           <div className="mb-3 flex items-center justify-between">
             <Dialog.Title className="text-base font-semibold">Your profile</Dialog.Title>
             <Dialog.Close asChild>
-              <button className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted" aria-label="Close">
+              <button className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-muted" aria-label="Close">
                 <X className="h-4 w-4" />
               </button>
             </Dialog.Close>
