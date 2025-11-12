@@ -128,7 +128,7 @@ export function SavedItemsView({
                   {item.type === "JOURNEY" && (
                     <button
                       onClick={async () => {
-                        const destination = getJourneyDestinationName(item.itineraryData?.legs ?? []);
+                        const destination = item.destinationName ?? getJourneyDestinationName(item.itineraryData?.legs ?? []);
                         const etaMinutes = formatDurationMinutes(item.totalDuration ?? 0);
                         const shareUrl = `${window.location.origin}/journey/${item.id}`;
                         const message = `View my Journey on Lokal! ETA to ${destination} is ${etaMinutes}. ${shareUrl}`;

@@ -40,6 +40,7 @@ export default function Home() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
   const [viewingSavedJourney, setViewingSavedJourney] = useState(false);
+  const [sharedJourneyDestinationName, setSharedJourneyDestinationName] = useState<string | null>(null);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -62,6 +63,7 @@ export default function Home() {
     setPlanError(null);
     setSelectedItineraryIndex(0);
     setViewingSavedJourney(false); // Clear saved journey flag when starting new journey
+    setSharedJourneyDestinationName(null); // Clear shared journey destination name
   }, []);
 
   const handleRemoveStop = useCallback((id: string) => {
@@ -94,6 +96,7 @@ export default function Home() {
     setPlanError(null);
     setSelectedItineraryIndex(0);
     setViewingSavedJourney(false); // Clear saved journey flag
+    setSharedJourneyDestinationName(null); // Clear shared journey destination name
   }, []);
 
   const handlePlanJourney = useCallback(() => {
@@ -216,7 +219,7 @@ export default function Home() {
         }
 
         const data = (await response.json()) as {
-          journey: { itineraryData: PlanItinerary };
+          journey: { itineraryData: PlanItinerary; destinationName?: string | null };
         };
 
         if (!data.journey?.itineraryData) {
@@ -231,6 +234,7 @@ export default function Home() {
         setSelectedItineraryIndex(0);
         setSelectedRoute(null);
         setViewingSavedJourney(true);
+        setSharedJourneyDestinationName(data.journey.destinationName ?? null);
       } catch (error) {
         console.error("Error loading shared journey:", error);
       }
@@ -402,7 +406,11 @@ export default function Home() {
         selectedItineraryIndex={selectedItineraryIndex}
         onSelectItinerary={handleSelectItinerary}
         viewingSavedJourney={viewingSavedJourney}
-        onExitSavedJourneyView={() => setViewingSavedJourney(false)}
+        sharedJourneyDestinationName={sharedJourneyDestinationName}
+        onExitSavedJourneyView={() => {
+          setViewingSavedJourney(false);
+          setSharedJourneyDestinationName(null);
+        }}
       />
       <MapboxMap
         selectedRoute={selectedRoute}

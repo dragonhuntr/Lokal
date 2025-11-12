@@ -41,6 +41,7 @@ const SaveItemSchema = z.discriminatedUnion("type", [
     }),
     originLat: z.number(),
     originLng: z.number(),
+    destinationName: z.string().trim().max(200).optional(),
   }),
   // Route type
   z.object({
@@ -70,6 +71,7 @@ export async function POST(request: Request, { params }: Context) {
           itineraryData: data.itineraryData,
           originLat: data.originLat,
           originLng: data.originLng,
+          destinationName: data.destinationName,
           totalDistance: data.itineraryData.totalDistanceMeters,
           totalDuration: data.itineraryData.totalDurationMinutes,
         },

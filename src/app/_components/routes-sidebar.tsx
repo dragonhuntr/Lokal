@@ -65,6 +65,7 @@ interface RoutesSidebarProps {
   selectedItineraryIndex?: number;
   onSelectItinerary?: (index: number, itinerary: PlanItinerary) => void;
   viewingSavedJourney?: boolean;
+  sharedJourneyDestinationName?: string | null;
   onExitSavedJourneyView?: () => void;
 }
 
@@ -125,6 +126,7 @@ export function RoutesSidebar({
   selectedItineraryIndex = 0,
   onSelectItinerary,
   viewingSavedJourney = false,
+  sharedJourneyDestinationName = null,
   onExitSavedJourneyView,
 }: RoutesSidebarProps) {
   const router = useRouter();
@@ -678,13 +680,14 @@ export function RoutesSidebar({
                 itinerary={itineraries?.[selectedItineraryIndex] ?? null}
                 activeDestination={activeDestination}
                 requireAuth={requireAuth}
-                onSaveJourney={async (itinerary, nickname) => {
+                onSaveJourney={async (itinerary, nickname, destinationName) => {
                   if (!userLocation) {
                     throw new Error("User location required to save journey");
                   }
-                  await savedItems.saveJourney(itinerary, userLocation.latitude, userLocation.longitude, nickname);
+                  await savedItems.saveJourney(itinerary, userLocation.latitude, userLocation.longitude, nickname, destinationName);
                 }}
                 viewingSavedJourney={viewingSavedJourney}
+                sharedJourneyDestinationName={sharedJourneyDestinationName}
                 onBackToSavedItems={() => {
                   if (onExitSavedJourneyView) {
                     onExitSavedJourneyView();
