@@ -34,6 +34,7 @@ interface PlaceSearchProps {
   onAddPlace: (place: PlaceResult) => void;
   onPlanJourney?: () => void;
   onSetManualOrigin?: (location: LocationSearchResult | null) => void;
+  onRemoveStop?: (id: string) => void;
 }
 
 function distanceBetweenMeters(
@@ -80,6 +81,7 @@ export function PlaceSearch({
   onAddPlace,
   onPlanJourney,
   onSetManualOrigin,
+  onRemoveStop,
 }: PlaceSearchProps) {
   const placesWithDistance = useMemo(() => {
     const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
@@ -182,6 +184,54 @@ export function PlaceSearch({
           >
             <X className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {journeyStops.length > 0 && (
+        <div className="mb-3 space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            Journey Stops ({journeyStops.length})
+          </div>
+          <div className="space-y-1.5">
+            {journeyStops.map((stop, index) => {
+              const isFinal = stop.id === finalStopId;
+              return (
+                <div
+                  key={stop.id}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                    isFinal
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-border bg-card"
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {stop.name}
+                      </div>
+                      {stop.placeName && stop.placeName !== stop.name && (
+                        <div className="truncate text-xs text-muted-foreground">
+                          {stop.placeName}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {onRemoveStop && (
+                    <button
+                      onClick={() => onRemoveStop(stop.id)}
+                      className="ml-2 flex-shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label={`Remove ${stop.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
