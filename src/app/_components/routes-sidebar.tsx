@@ -113,6 +113,7 @@ export function RoutesSidebar({
   selectedLocation,
   journeyStops = [],
   onAddStop,
+  onRemoveStop,
   onPlanJourney,
   userLocation,
   manualOrigin,
@@ -662,6 +663,7 @@ export function RoutesSidebar({
                 onAddPlace={handleAddPlace}
                 onPlanJourney={onPlanJourney}
                 onSetManualOrigin={onSetManualOrigin}
+                onRemoveStop={onRemoveStop}
               />
             ) : view === "route-options" ? (
               <ItineraryOptions
