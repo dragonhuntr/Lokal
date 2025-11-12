@@ -24,53 +24,11 @@ export function SavedItemsView({
   onDelete,
 }: SavedItemsViewProps) {
   const [copiedJourneyId, setCopiedJourneyId] = useState<string | null>(null);
-  const filteredItems = filter === "all"
-    ? items.items
-    : filter === "journeys"
-    ? items.journeys
-    : items.routes;
+  // Only show journeys (routes are now shown in explore mode)
+  const filteredItems = items.journeys;
 
   return (
     <div className="flex flex-col gap-3 flex-1 overflow-hidden">
-      {/* Filter Tabs */}
-      <div className="flex gap-2 border-b pb-2" role="tablist" aria-label="Saved items filter">
-        <button
-          role="tab"
-          aria-selected={filter === "all"}
-          onClick={() => onFilterChange("all")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-md focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-            filter === "all"
-              ? "bg-blue-50 text-blue-600"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          }`}
-        >
-          All ({items.items.length})
-        </button>
-        <button
-          role="tab"
-          aria-selected={filter === "journeys"}
-          onClick={() => onFilterChange("journeys")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-md focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-            filter === "journeys"
-              ? "bg-blue-50 text-blue-600"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          }`}
-        >
-          Journeys ({items.journeys.length})
-        </button>
-        <button
-          role="tab"
-          aria-selected={filter === "routes"}
-          onClick={() => onFilterChange("routes")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-md focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-            filter === "routes"
-              ? "bg-blue-50 text-blue-600"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          }`}
-        >
-          Routes ({items.routes.length})
-        </button>
-      </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto" role="tabpanel">
@@ -78,10 +36,10 @@ export function SavedItemsView({
           <div className="flex flex-col items-center justify-center h-64 text-center px-4">
             <MapPin className="w-12 h-12 text-muted-foreground/30 mb-3" aria-hidden="true" />
             <h3 className="text-sm font-semibold text-foreground mb-1">
-              No saved items yet
+              No saved journeys yet
             </h3>
             <p className="text-xs text-muted-foreground max-w-xs">
-              Start planning journeys and saving your favorite routes to see them here.
+              Start planning journeys to see them here.
             </p>
           </div>
         ) : (
@@ -97,21 +55,13 @@ export function SavedItemsView({
                     <h3 className="font-medium text-sm text-foreground truncate mb-1">
                       {item.nickname ?? "Untitled"}
                     </h3>
-                    {item.type === "JOURNEY" ? (
-                      <JourneyDetails journey={item} />
-                    ) : (
-                      <RouteDetails route={item} />
-                    )}
+                    <JourneyDetails journey={item} />
                   </div>
                   <span
-                    className={`ml-2 px-2 py-0.5 text-xs font-medium rounded flex-shrink-0 ${
-                      item.type === "JOURNEY"
-                        ? "bg-purple-100 text-purple-700"
-                        : "bg-blue-100 text-blue-700"
-                    }`}
-                    aria-label={`Item type: ${item.type === "JOURNEY" ? "Journey" : "Route"}`}
+                    className="ml-2 px-2 py-0.5 text-xs font-medium rounded flex-shrink-0 bg-purple-100 text-purple-700"
+                    aria-label="Item type: Journey"
                   >
-                    {item.type === "JOURNEY" ? "Journey" : "Route"}
+                    Journey
                   </span>
                 </div>
 
@@ -125,33 +75,31 @@ export function SavedItemsView({
 
                 {/* Actions */}
                 <div className="flex gap-2">
-                  {item.type === "JOURNEY" && (
-                    <button
-                      onClick={async () => {
-                        const destination = item.destinationName ?? getJourneyDestinationName(item.itineraryData?.legs ?? []);
-                        const etaMinutes = formatDurationMinutes(item.totalDuration ?? 0);
-                        const shareUrl = `${window.location.origin}/journey/${item.id}`;
-                        const message = `View my Journey on Lokal! ETA to ${destination} is ${etaMinutes}. ${shareUrl}`;
+                  <button
+                    onClick={async () => {
+                      const destination = item.destinationName ?? getJourneyDestinationName(item.itineraryData?.legs ?? []);
+                      const etaMinutes = formatDurationMinutes(item.totalDuration ?? 0);
+                      const shareUrl = `${window.location.origin}/journey/${item.id}`;
+                      const message = `View my Journey on Lokal! ETA to ${destination} is ${etaMinutes}. ${shareUrl}`;
 
-                        try {
-                          if (navigator.clipboard?.writeText) {
-                            await navigator.clipboard.writeText(message);
-                          } else {
-                            throw new Error("Clipboard API unavailable");
-                          }
-                          setCopiedJourneyId(item.id);
-                          setTimeout(() => setCopiedJourneyId((current) => (current === item.id ? null : current)), 2000);
-                        } catch (error) {
-                          console.error("Failed to copy journey share link", error);
-                          alert("Unable to copy share link. Please copy it manually: " + shareUrl);
+                      try {
+                        if (navigator.clipboard?.writeText) {
+                          await navigator.clipboard.writeText(message);
+                        } else {
+                          throw new Error("Clipboard API unavailable");
                         }
-                      }}
-                      className="flex items-center justify-center gap-1.5 rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
-                    >
-                      <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      {copiedJourneyId === item.id ? "Copied!" : "Share"}
-                    </button>
-                  )}
+                        setCopiedJourneyId(item.id);
+                        setTimeout(() => setCopiedJourneyId((current) => (current === item.id ? null : current)), 2000);
+                      } catch (error) {
+                        console.error("Failed to copy journey share link", error);
+                        alert("Unable to copy share link. Please copy it manually: " + shareUrl);
+                      }
+                    }}
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+                  >
+                    <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    {copiedJourneyId === item.id ? "Copied!" : "Share"}
+                  </button>
                   <button
                     onClick={() => onViewOnMap(item.id)}
                     className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-medium focus:outline-2 focus:outline-offset-2 focus:outline-ring"
@@ -220,18 +168,6 @@ function JourneyDetails({ journey }: { journey: { type: "JOURNEY"; itineraryData
         {walkLegs.length > 0 && <span>• {walkLegs.length} walk</span>}
         {busLegs.length > 0 && <span>• {busLegs.length} bus</span>}
       </div>
-    </div>
-  );
-}
-
-function RouteDetails({ route }: { route: { type: "ROUTE"; routeId: string } }) {
-  return (
-    <div className="space-y-1 text-xs text-muted-foreground">
-      <div className="flex items-center gap-1">
-        <Bus className="w-3 h-3" aria-hidden="true" />
-        <span>Bus Line</span>
-      </div>
-      <div className="text-xs">Route ID: {route.routeId}</div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { Search } from "lucide-react";
+import { Bus, Search } from "lucide-react";
 import type { RouterOutputs } from "@/trpc/react";
 
 import { Spinner } from "@/components/ui/spinner";
@@ -18,6 +18,9 @@ interface RoutesListProps {
   hasVehiclesLoaded: boolean;
   onSelectRoute?: (route: RouteSummary) => void;
   requireAuth: (action: () => void | Promise<void>) => void;
+  excludeRouteIds?: Set<number>;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
 }
 
 export function RoutesList({
@@ -28,22 +31,33 @@ export function RoutesList({
   hasVehiclesLoaded,
   onSelectRoute,
   requireAuth: _requireAuth,
+  excludeRouteIds,
+  searchQuery: externalSearchQuery,
+  onSearchQueryChange,
 }: RoutesListProps) {
-  const [routeQuery, setRouteQuery] = useState("");
+  const [internalRouteQuery, setInternalRouteQuery] = useState("");
+  const routeQuery = externalSearchQuery ?? internalRouteQuery;
+  const setRouteQuery = onSearchQueryChange ?? setInternalRouteQuery;
 
   const filteredRoutes = useMemo(() => {
     if (!routes) return [];
     
-    // First filter by active buses (only if vehicles data has loaded)
-    let activeRoutes = routes;
+    // First filter out saved routes if excludeRouteIds is provided
+    let availableRoutes = routes;
+    if (excludeRouteIds && excludeRouteIds.size > 0) {
+      availableRoutes = routes.filter((r) => !excludeRouteIds.has(r.RouteId));
+    }
+    
+    // Then filter by active buses (only if vehicles data has loaded)
+    let activeRoutes = availableRoutes;
     if (hasVehiclesLoaded) {
-      activeRoutes = routes.filter((r) => {
+      activeRoutes = availableRoutes.filter((r) => {
         const vehicleCount = vehiclesByRoute.get(r.RouteId) ?? 0;
         return vehicleCount > 0;
       });
     }
     
-    // Then filter by search query
+    // Finally filter by search query
     const q = routeQuery.trim().toLowerCase();
     if (!q) return activeRoutes;
     return activeRoutes.filter((r) =>
@@ -51,35 +65,20 @@ export function RoutesList({
         .filter(Boolean)
         .some((value) => value?.toLowerCase().includes(q))
     );
-  }, [routes, routeQuery, vehiclesByRoute, hasVehiclesLoaded]);
+  }, [routes, routeQuery, vehiclesByRoute, hasVehiclesLoaded, excludeRouteIds]);
 
   const statusMessage = useMemo(() => {
     if (isLoading) return "Loading routes…";
     if (!routes?.length) return "No routes available.";
-    if (!routeQuery.trim()) {
-      if (hasVehiclesLoaded) {
-        return `${filteredRoutes.length} active route${filteredRoutes.length === 1 ? "" : "s"}`;
-      }
-      return `${routes.length} routes`;
-    }
+    if (!routeQuery.trim()) return;
     return `${filteredRoutes.length} route${filteredRoutes.length === 1 ? "" : "s"} match`;
   }, [isLoading, routes, filteredRoutes, routeQuery, hasVehiclesLoaded]);
 
   return (
     <>
-      <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
-        <Search className="h-4 w-4 opacity-60" />
-        <input
-          type="search"
-          value={routeQuery}
-          onChange={(event) => setRouteQuery(event.target.value)}
-          placeholder="Search bus lines…"
-          className="h-11 w-full bg-transparent text-sm outline-none"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck="false"
-        />
+      <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
+        <Bus className="h-3.5 w-3.5" />
+        <span>Active Routes</span>
       </div>
 
       <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
