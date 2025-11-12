@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
@@ -44,6 +44,7 @@ export default function Home() {
   const [locationWatcherId, setLocationWatcherId] = useState<number | null>(null);
   const [savedJourneyOrigin, setSavedJourneyOrigin] = useState<Coordinates | null>(null);
   const [savedJourneyDestination, setSavedJourneyDestination] = useState<Coordinates | null>(null);
+  const hasAutoRequestedLocation = useRef(false);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -351,6 +352,22 @@ export default function Home() {
       }
     };
   }, [locationWatcherId]);
+
+  // Automatically request location if onboarding is completed but location hasn't been requested
+  useEffect(() => {
+    const ONBOARDING_STORAGE_KEY = "lokal_onboarding_completed";
+    const onboardingCompleted = localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
+    
+    // Only auto-request once if:
+    // 1. Onboarding is completed
+    // 2. User location is not set
+    // 3. Geolocation is available
+    // 4. We haven't already attempted an auto-request
+    if (onboardingCompleted && !userLocation && "geolocation" in navigator && !hasAutoRequestedLocation.current) {
+      hasAutoRequestedLocation.current = true;
+      requestLocation();
+    }
+  }, [userLocation, requestLocation]);
 
   useEffect(() => {
     if (!journeyStops.length) {
