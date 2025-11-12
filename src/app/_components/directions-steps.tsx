@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { ArrowLeft, Bookmark, BusFront, Footprints, Share2 } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
@@ -11,7 +11,7 @@ interface DirectionsStepsProps {
   itinerary?: PlanItinerary | null;
   activeDestination?: LocationSearchResult | null;
   requireAuth: (action: () => void | Promise<void>) => void;
-  onOpenSaveDialog: () => void;
+  onSaveJourney: (itinerary: PlanItinerary, nickname?: string) => Promise<void>;
   viewingSavedJourney?: boolean;
   onBackToSavedItems?: () => void;
 }
@@ -40,16 +40,39 @@ export function DirectionsSteps({
   itinerary,
   activeDestination,
   requireAuth,
-  onOpenSaveDialog,
+  onSaveJourney,
   viewingSavedJourney = false,
   onBackToSavedItems,
 }: DirectionsStepsProps) {
   const savedItems = useSavedItems();
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [justRemoved, setJustRemoved] = useState(false);
 
   const matchingSavedJourney = useMemo(() => {
     if (!itinerary) return null;
-    return savedItems.journeys.find((j) => JSON.stringify(j.itineraryData) === JSON.stringify(itinerary)) ?? null;
+    return savedItems.journeys.find((j) => {
+      // Compare key properties instead of full JSON.stringify for better reliability
+      const saved = j.itineraryData;
+      if (!saved) return false;
+      
+      // Compare total duration and distance as quick checks
+      if (
+        Math.abs(saved.totalDurationMinutes - itinerary.totalDurationMinutes) > 0.1 ||
+        Math.abs(saved.totalDistanceMeters - itinerary.totalDistanceMeters) > 1
+      ) {
+        return false;
+      }
+      
+      // Compare number of legs
+      if (saved.legs?.length !== itinerary.legs?.length) {
+        return false;
+      }
+      
+      // Deep comparison of legs
+      return JSON.stringify(saved) === JSON.stringify(itinerary);
+    }) ?? null;
   }, [itinerary, savedItems.journeys]);
 
   if (!itinerary) {
@@ -60,7 +83,21 @@ export function DirectionsSteps({
     );
   }
 
-  const isSaved = !!matchingSavedJourney;
+  const isSaved = (!!matchingSavedJourney || justSaved) && !justRemoved;
+
+  // Clear justSaved flag once the saved journey is found in the refetched data
+  useEffect(() => {
+    if (justSaved && matchingSavedJourney) {
+      setJustSaved(false);
+    }
+  }, [justSaved, matchingSavedJourney]);
+
+  // Clear justRemoved flag once the saved journey is no longer found after removal
+  useEffect(() => {
+    if (justRemoved && !matchingSavedJourney) {
+      setJustRemoved(false);
+    }
+  }, [justRemoved, matchingSavedJourney]);
 
   // Get destination name: prefer activeDestination, fall back to last leg's end stop name
   const lastLeg = itinerary.legs.length > 0 ? itinerary.legs[itinerary.legs.length - 1] : null;
@@ -131,19 +168,31 @@ export function DirectionsSteps({
                       requireAuth(async () => {
                         const button = e.currentTarget;
                         button.disabled = true;
+                        setIsSaving(true);
+                        setJustSaved(false);
 
                         try {
                           if (isSaved && matchingSavedJourney) {
                             await savedItems.remove(matchingSavedJourney.id);
-                          } else {
-                            onOpenSaveDialog();
+                            setJustRemoved(true);
+                            // Refetch to update the UI
+                            await savedItems.refetch();
+                          } else if (itinerary) {
+                            const nickname = activeDestination?.name ?? activeDestination?.placeName ?? undefined;
+                            await onSaveJourney(itinerary, nickname);
+                            setJustSaved(true);
+                            setJustRemoved(false);
+                            // Refetch to update the UI
+                            await savedItems.refetch();
                           }
                         } finally {
                           button.disabled = false;
+                          setIsSaving(false);
                         }
                       });
                     }}
                     aria-label={isSaved ? "Remove from saved" : "Save journey"}
+                    disabled={isSaving}
                     className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                       isSaved
                         ? "bg-blue-600 border-blue-600 text-white"
