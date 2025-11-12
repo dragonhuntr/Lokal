@@ -184,6 +184,62 @@ export async function getCachedWithJitter<T>(
 }
 
 /**
+ * Batch fetch multiple cached values at once using MGET for better performance
+ * @param keys - Array of cache keys to fetch
+ * @returns Map of key -> cached value (or null if miss)
+ */
+export async function getCachedBatch<T>(
+  keys: string[]
+): Promise<Map<string, T | null>> {
+  const client = getRedisClient();
+  const result = new Map<string, T | null>();
+
+  if (!client || keys.length === 0) {
+    // Initialize all as null if Redis unavailable
+    keys.forEach((key) => result.set(key, null));
+    return result;
+  }
+
+  try {
+    // Check connection state
+    if (client.status !== 'ready') {
+      keys.forEach((key) => result.set(key, null));
+      return result;
+    }
+
+    // Use MGET to fetch all keys in a single round trip
+    const values = await client.mget(...keys);
+
+    // Parse results
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const value = values[i];
+
+      if (value) {
+        try {
+          const parsed = JSON.parse(value) as T;
+          result.set(key, parsed);
+        } catch (parseError) {
+          console.error(`[Redis] Failed to parse cached data for ${key}:`, parseError);
+          // Delete corrupted cache entry
+          await client.del(key).catch(console.error);
+          result.set(key, null);
+        }
+      } else {
+        result.set(key, null);
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error(`[Redis] Error in getCachedBatch:`, error);
+    // Return all as null on error
+    keys.forEach((key) => result.set(key, null));
+    return result;
+  }
+}
+
+/**
  * Delete a key from cache
  * @param key - Cache key to delete
  */
