@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, Bookmark, Navigation, Bus } from "lucide-react";
 import { useSavedItems } from "@/trpc/saved-items";
@@ -10,8 +10,8 @@ interface SaveJourneyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   itinerary: PlanItinerary | null;
-  originLat: number;
-  originLng: number;
+  originLat: number | null;
+  originLng: number | null;
   defaultNickname?: string;
 }
 
@@ -27,8 +27,13 @@ export function SaveJourneyDialog({
   const [nickname, setNickname] = useState(defaultNickname ?? "");
   const [isSaving, setIsSaving] = useState(false);
 
+  // Sync nickname with defaultNickname when it changes
+  useEffect(() => {
+    setNickname(defaultNickname ?? "");
+  }, [defaultNickname]);
+
   const handleSave = async () => {
-    if (!itinerary) return;
+    if (!itinerary || originLat === null || originLng === null) return;
 
     setIsSaving(true);
     try {
@@ -141,7 +146,7 @@ export function SaveJourneyDialog({
               </Dialog.Close>
               <button
                 onClick={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || originLat === null || originLng === null}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2"
               >
                 {isSaving ? (

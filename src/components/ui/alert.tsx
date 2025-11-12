@@ -113,26 +113,36 @@ function Alert({
   )
 }
 
-interface AlertTitleProps extends React.ComponentProps<"h5"> {}
+export type AlertTitleProps = React.ComponentProps<"h5">
 
-function AlertTitle({ className, ...props }: AlertTitleProps) {
+const AlertTitle = React.forwardRef<
+  HTMLHeadingElement,
+  AlertTitleProps
+>(({ className, ...props }, ref) => {
   return (
     <h5
+      ref={ref}
       className={cn("mb-1 font-medium leading-none tracking-tight", className)}
       {...props}
     />
   )
-}
+})
+AlertTitle.displayName = "AlertTitle"
 
-interface AlertDescriptionProps extends React.ComponentProps<"div"> {}
+export type AlertDescriptionProps = React.ComponentProps<"div">
 
-function AlertDescription({ className, ...props }: AlertDescriptionProps) {
+const AlertDescription = React.forwardRef<
+  HTMLDivElement,
+  AlertDescriptionProps
+>(({ className, ...props }, ref) => {
   return (
     <div
+      ref={ref}
       className={cn("text-sm [&_p]:leading-relaxed", className)}
       {...props}
     />
   )
-}
+})
+AlertDescription.displayName = "AlertDescription"
 
 export { Alert, AlertTitle, AlertDescription }
