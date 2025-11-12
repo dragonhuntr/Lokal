@@ -628,7 +628,50 @@ export function MapboxMap({
           </Source>
         )}
 
-        {/* Render buses as simple SVG markers */}
+        {/* Render stops for the selected route */}
+        {selectedRoute &&
+          routeDetails?.Stops?.map((stop, index) => {
+            const isFirst = index === 0;
+            const isLast = index === (routeDetails.Stops?.length ?? 0) - 1;
+            
+            return (
+              <Marker
+                key={stop.StopId}
+                latitude={stop.Latitude}
+                longitude={stop.Longitude}
+                anchor="center"
+              >
+                <div className="group relative flex items-center justify-center">
+                  {/* Stop marker with different styles for first/last stops */}
+                  <div className="flex items-center justify-center">
+                    <span
+                      className={`inline-block rounded-full border-2 border-white shadow-lg transition-all hover:scale-125 ${
+                        isFirst || isLast
+                          ? "h-5 w-5"
+                          : "h-3 w-3"
+                      }`}
+                      style={{
+                        backgroundColor: routeColor,
+                      }}
+                      title={stop.Name}
+                    />
+                  </div>
+
+                  {/* Tooltip with stop name - shows on hover */}
+                  <div className="pointer-events-none absolute bottom-full mb-2 hidden w-max max-w-xs rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
+                    <div className="font-semibold">{stop.Name}</div>
+                    {stop.Description && (
+                      <div className="text-[10px] text-gray-300">{stop.Description}</div>
+                    )}
+                    {/* Arrow pointing down */}
+                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                  </div>
+                </div>
+              </Marker>
+            );
+          })}
+
+        {/* Render buses as simple SVG markers - rendered after stops so they appear on top */}
         {selectedRoute &&
           routeDetails?.Vehicles?.map((vehicle) => (
             <Marker
@@ -644,7 +687,7 @@ export function MapboxMap({
                   transform: `rotate(${vehicle.Heading ?? 0}deg)`,
                 }}
               >
-                <svg width="40" height="40" viewBox="0 0 40 40">
+                <svg width="56" height="56" viewBox="0 0 40 40">
                   {/* Bus body */}
                   <rect
                     x="10"
@@ -654,16 +697,16 @@ export function MapboxMap({
                     rx="2"
                     fill={routeColor}
                     stroke="#fff"
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                   />
                   {/* Windows */}
                   <rect x="12" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
                   <rect x="22" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
                   {/* Wheels */}
-                  <circle cx="15" cy="28" r="3" fill="#333" />
-                  <circle cx="25" cy="28" r="3" fill="#333" />
+                  <circle cx="15" cy="28" r="3.5" fill="#333" />
+                  <circle cx="25" cy="28" r="3.5" fill="#333" />
                   {/* Direction indicator (front) */}
-                  <rect x="18" y="10" width="4" height="2" fill="#fff" />
+                  <rect x="18" y="10" width="4" height="2.5" fill="#fff" />
                 </svg>
               </div>
             </Marker>

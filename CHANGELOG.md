@@ -295,6 +295,21 @@ All notable changes to the Lokal transit app project.
 - ✅ Keyboard navigation fully functional
 - ✅ Screen reader support throughout
 
+**UI/Visual Fixes**:
+- ✅ Fixed alignment issue with highlighted stop icons in route detail view
+  - Removed negative margin (`-m-2`) that was shifting highlighted stop containers
+  - Stop icons now properly aligned with vertical timeline regardless of highlight state
+- ✅ Improved stop circle visibility in route detail view
+  - Non-highlighted stop circles now have white background instead of transparent
+  - Prevents vertical line from showing through stop markers
+- ✅ Enhanced route timeline visual design
+  - Vertical line thickness increased from `w-0.5` (2px) to `w-4` (16px)
+  - Vertical line positioned at `left-2` with rounded corners (`rounded-full`)
+  - Vertical line now matches route color for better visual consistency
+- ✅ Simplified highlighted stop styling
+  - Removed background color from highlighted stops (transparent background)
+  - Maintains padding and rounded corners for spacing without visual distraction
+
 ### Performance Metrics
 
 **Expected Improvements**:
@@ -347,16 +362,20 @@ npx prisma migrate dev --name add_performance_indexes
 **Performance**:
 - `prisma/schema.prisma` - Added database indexes
 - `src/server/db.ts` - Connection pooling and graceful shutdown
-- `src/server/bus-api.ts` - N+1 fix, memory leak fix, cleanup handlers
+- `src/server/bus-api.ts` - N+1 fix, memory leak fix, cleanup handlers, Redis caching for routes and route details
+- `src/server/api/routers/bus.ts` - Added prefetchRouteDetails mutation with proper await handling
 - `src/app/api/routes/route.ts` - HTTP cache headers
 - `src/app/api/routes/[id]/route.ts` - HTTP cache headers
+- `src/app/_components/routes-sidebar.tsx` - Added route prefetching logic, passes hasVehiclesLoaded prop
+- `src/app/_components/routes-list.tsx` - Added filtering for routes with active buses, updated status messages
 - `next.config.js` - Production optimizations
 
 **UI Components**:
 - `src/app/layout.tsx` - Toast notifications setup
-- `src/app/_components/routes-list.tsx` - Spinner + Skeleton
+- `src/app/_components/routes-list.tsx` - Spinner + Skeleton, route filtering by active buses
 - `src/app/_components/place-search.tsx` - Spinner + Skeleton
 - `src/app/_components/itinerary-options.tsx` - Spinner + Skeleton
+- `src/app/_components/route-detail-view.tsx` - Fixed stop icon alignment, improved timeline styling, route color matching
 
 **Responsive Design**:
 - `src/app/_components/routes-sidebar.tsx` - Responsive breakpoints, refactored
@@ -392,6 +411,8 @@ npx prisma migrate dev --name add_performance_indexes
 - 30-50% smaller production bundles
 - 60-80% smaller network payloads
 - 80-95% reduced server load (caching)
+- Instant route viewing (Redis cache + prefetching)
+- Reduced external API calls (routes and route details cached)
 
 **Code Quality**:
 - 213 lines removed from routes-sidebar.tsx (23% reduction)
