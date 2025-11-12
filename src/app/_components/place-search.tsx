@@ -82,6 +82,8 @@ export function PlaceSearch({
   onSetManualOrigin,
 }: PlaceSearchProps) {
   const placesWithDistance = useMemo(() => {
+    const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
+
     return placeResults
       .map((result) => {
         if (result.distanceMeters !== undefined) {
@@ -99,6 +101,16 @@ export function PlaceSearch({
 
         return { ...result, distanceMeters };
       })
+      .filter((result) => {
+        // If no user location, include all results
+        if (!userLocation) return true;
+        
+        // If no distance calculated, exclude (can't verify radius)
+        if (result.distanceMeters === undefined) return false;
+        
+        // Filter to only include results within 150 miles
+        return result.distanceMeters <= MAX_RADIUS_METERS;
+      })
       .sort((a, b) => {
         const aDistance = a.distanceMeters ?? Number.POSITIVE_INFINITY;
         const bDistance = b.distanceMeters ?? Number.POSITIVE_INFINITY;
@@ -107,7 +119,7 @@ export function PlaceSearch({
   }, [placeResults, userLocation]);
 
   const statusMessage = useMemo(() => {
-    if (!placeQuery.trim()) return "Search for a building or location.";
+    if (!placeQuery.trim()) return;
     if (error) return error;
     if (isLoading) return "Searching…";
     if (!placeResults.length) return "No places found.";
@@ -185,9 +197,9 @@ export function PlaceSearch({
       <div className="flex-1 min-h-0">
         <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
           <ScrollArea.Viewport className="h-full w-full overflow-x-hidden">
-            <ul className="space-y-2 p-2 pr-3">
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, index) => (
+            {isLoading ? (
+              <ul className="space-y-2 p-2 pr-3">
+                {Array.from({ length: 4 }).map((_, index) => (
                   <li key={index}>
                     <div className="w-full rounded-2xl border bg-card px-4 py-4">
                       <div className="space-y-2">
@@ -197,9 +209,11 @@ export function PlaceSearch({
                       </div>
                     </div>
                   </li>
-                ))
-              ) : (
-                placesWithDistance.map((place) => {
+                ))}
+              </ul>
+            ) : placesWithDistance.length > 0 ? (
+              <ul className="space-y-2 p-2 pr-3">
+                {placesWithDistance.map((place) => {
                 const identifiedLocation = place.location;
                 const summaryContext = place.context.join(" • ");
                 const subtitle =
@@ -260,9 +274,18 @@ export function PlaceSearch({
                     </button>
                   </li>
                 );
-              })
-              )}
-            </ul>
+              })}
+              </ul>
+            ) : (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="text-center">
+                  <MapPin className="mx-auto h-12 w-12 text-muted-foreground/40 mb-3" />
+                  <p className="text-sm text-muted-foreground">
+                    {placeQuery.trim() ? "No places found." : "Search for a building or location."}
+                  </p>
+                </div>
+              </div>
+            )}
           </ScrollArea.Viewport>
           <ScrollArea.Scrollbar orientation="vertical">
             <ScrollArea.Thumb className="rounded-full bg-border/60" />

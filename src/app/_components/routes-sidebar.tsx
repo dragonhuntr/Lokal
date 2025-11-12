@@ -624,10 +624,6 @@ export function RoutesSidebar({
                     )}
                   </div>
                 </div>
-              ) : mode === "explore" ? (
-                <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">Browse bus lines and see active buses</div>
-              ) : mode === "plan" ? (
-                <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">Search for your destination</div>
               ) : null}
 
               {/* Content Views */}
