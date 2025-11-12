@@ -77,17 +77,6 @@ export function DirectionsSteps({
     }) ?? null;
   }, [itinerary, savedItems.journeys]);
 
-  if (!itinerary) {
-    return (
-      <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
-        No route selected
-      </div>
-    );
-  }
-
-  const isSaved = (!!matchingSavedJourney || justSaved) && !justRemoved;
-  const isSharedJourney = viewingSavedJourney && !matchingSavedJourney;
-
   // Clear justSaved flag once the saved journey is found in the refetched data
   useEffect(() => {
     if (justSaved && matchingSavedJourney) {
@@ -101,6 +90,17 @@ export function DirectionsSteps({
       setJustRemoved(false);
     }
   }, [justRemoved, matchingSavedJourney]);
+
+  if (!itinerary) {
+    return (
+      <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
+        No route selected
+      </div>
+    );
+  }
+
+  const isSaved = (!!matchingSavedJourney || justSaved) && !justRemoved;
+  const isSharedJourney = viewingSavedJourney && !matchingSavedJourney;
 
   // Get destination name: prefer shared journey destination name, then activeDestination, fall back to last leg's end stop name
   const lastLeg = itinerary.legs.length > 0 ? itinerary.legs[itinerary.legs.length - 1] : null;
