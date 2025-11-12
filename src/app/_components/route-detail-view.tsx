@@ -38,6 +38,30 @@ export function RouteDetailView({
     { refetchInterval: 30000 }
   );
 
+  // Get route color, defaulting to blue if not available
+  const routeColor = useMemo(() => {
+    const raw = route.Color?.trim();
+    if (!raw) return "#2563eb";
+    return raw.startsWith("#") ? raw : `#${raw}`;
+  }, [route.Color]);
+
+  // Create a lighter version of the route color for backgrounds
+  const routeColorLight = useMemo(() => {
+    // Convert hex to RGB and add opacity
+    const hex = routeColor.replace("#", "");
+    if (hex.length !== 6) {
+      // Fallback if color format is unexpected
+      return "rgba(37, 99, 235, 0.15)"; // Default blue with opacity
+    }
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+      return "rgba(37, 99, 235, 0.15)"; // Default blue with opacity
+    }
+    return `rgba(${r}, ${g}, ${b}, 0.15)`;
+  }, [routeColor]);
+
   // Process stops with nearest bus info
   const stopsWithBuses = useMemo<StopWithBus[]>(() => {
     if (!routeDetails?.Stops || !stopDepartures) return [];
@@ -160,7 +184,10 @@ export function RouteDetailView({
             <div className="p-4">
               <div className="relative">
                 {/* Vertical line */}
-                <div className="absolute bottom-0 left-4 top-0 w-0.5 bg-border" />
+                <div 
+                  className="absolute bottom-0 top-0 left-2 w-4 rounded-full" 
+                  style={{ backgroundColor: routeColor }}
+                />
 
                 {/* Stops */}
                 <div className="space-y-6">
@@ -168,40 +195,75 @@ export function RouteDetailView({
                     const isFirst = index === 0;
                     const isLast = index === stopsWithBuses.length - 1;
                     const hasNearbyBus = !!item.nearestBus;
+                    const isBusHere = hasNearbyBus && isBusCurrentlyAtStop(item.nearestBus!.etaLocalTime);
 
                     return (
-                      <div key={item.stop.StopId} className="relative pl-10">
+                      <div
+                        key={item.stop.StopId}
+                        className={`relative pl-10 ${
+                          isBusHere ? "rounded-lg p-2" : ""
+                        }`}
+                      >
                         {/* Stop marker */}
-                        <div
-                          className={`absolute left-0 flex h-8 w-8 items-center justify-center rounded-full border-2 ${
-                            hasNearbyBus
-                              ? "border-orange-500 bg-orange-100"
-                              : isFirst || isLast
-                                ? "border-blue-500 bg-blue-100"
-                                : "border-border bg-white"
-                          }`}
-                        >
-                          <MapPin
-                            className={`h-4 w-4 ${
-                              hasNearbyBus
-                                ? "text-orange-600"
-                                : "text-muted-foreground"
+                        <div className="absolute left-4 top-0 flex h-8 w-8 -translate-x-1/2 items-center justify-center">
+                          <div
+                            className={`relative flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all ${
+                              isBusHere
+                                ? ""
+                                : hasNearbyBus
+                                  ? ""
+                                  : isFirst || isLast
+                                    ? "border-blue-500 bg-blue-100"
+                                    : "border-border bg-white"
                             }`}
-                          />
+                            style={
+                              hasNearbyBus
+                                ? {
+                                    borderColor: routeColor,
+                                    backgroundColor: isBusHere ? routeColor : "#ffffff",
+                                    borderWidth: isBusHere ? "3px" : "2px",
+                                  }
+                                : undefined
+                            }
+                          >
+                            <MapPin
+                              className={`h-4 w-4 ${
+                                hasNearbyBus ? "" : "text-muted-foreground"
+                              }`}
+                              style={
+                                hasNearbyBus
+                                  ? {
+                                      color: isBusHere ? "#ffffff" : routeColor,
+                                    }
+                                  : undefined
+                              }
+                            />
+                          </div>
                         </div>
 
                         {/* Stop info */}
                         <div>
-                          <div className="text-sm font-medium">
+                          <div className={`text-sm font-medium ${isBusHere ? "font-bold" : ""}`}>
                             {item.stop.Name}
                           </div>
 
                           {item.nearestBus && (
                             <div className="mt-1 flex items-center gap-2 text-xs">
-                              <Bus className="h-3.5 w-3.5 text-orange-600" />
-                              <span className="font-semibold text-orange-600">
+                              <Bus
+                                className="h-3.5 w-3.5"
+                                style={{ color: routeColor }}
+                              />
+                              <span
+                                className={`font-semibold ${isBusHere ? "text-base font-bold" : ""}`}
+                                style={{ color: routeColor }}
+                              >
                                 {formatETA(item.nearestBus.etaLocalTime)}
                               </span>
+                              {isBusHere && (
+                                <span className="rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                                  AT STOP
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -268,5 +330,18 @@ function formatETA(etaLocalTime: string): string {
     });
   } catch {
     return "Unknown";
+  }
+}
+
+function isBusCurrentlyAtStop(etaLocalTime: string): boolean {
+  try {
+    const etaDate = new Date(etaLocalTime);
+    const now = new Date();
+    const diffMinutes = Math.round(
+      (etaDate.getTime() - now.getTime()) / 60000
+    );
+    return diffMinutes <= 0;
+  } catch {
+    return false;
   }
 }
