@@ -1,7 +1,8 @@
-import dynamic from "next/dynamic";
-import type { Metadata } from "next";
+"use client";
 
-const SwaggerClient = dynamic(
+import dynamicImport from "next/dynamic";
+
+const SwaggerClient = dynamicImport(
   async () => {
     const mod = await import("./swagger-client");
     return mod.SwaggerClient;
@@ -15,13 +16,6 @@ const SwaggerClient = dynamic(
     ),
   }
 );
-
-export const metadata: Metadata = {
-  title: "API Documentation | Lokal",
-  description: "Interactive Swagger UI for the Lokal HTTP API.",
-};
-
-export const dynamic = "force-dynamic";
 
 export default function ApiDocsPage() {
   return (

@@ -3,6 +3,7 @@
 import type { Stop, Route as PrismaRoute } from "@prisma/client";
 
 import { db } from "@/server/db";
+import { fetchRoutes } from "@/server/bus-api";
 
 export interface Coordinate {
   latitude: number;
@@ -35,6 +36,7 @@ export interface PlanLeg {
   routeId?: string;
   routeName?: string;
   routeNumber?: string;
+  routeColor?: string;
   startStopId?: string;
   startStopName?: string;
   endStopId?: string;
@@ -51,6 +53,7 @@ export interface PlanItinerary {
   routeId?: string;
   routeName?: string;
   routeNumber?: string;
+  routeColor?: string;
   startStopId?: string;
   endStopId?: string;
 }
@@ -64,6 +67,8 @@ const WALKING_SPEED_MPS = 1.4; // ~5 km/h
 const BUS_SPEED_MPS = 8.33; // ~30 km/h average urban speed
 const BUS_DWELL_SECONDS = 30;
 const DEFAULT_MAX_WALK_METERS = 1000;
+const DEFAULT_ROUTE_COLOR = '2563eb'; // Blue
+const WALKING_COLOR = '6b7280'; // Gray
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
@@ -365,20 +370,56 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
   const limit = normalizeLimit(rawLimit);
   const network = await fetchNetwork();
 
+  // Fetch route colors from the bus API
+  const busRoutes = await fetchRoutes();
+  const routeColorMap = new Map<string, string>();
+  busRoutes.forEach((route) => {
+    routeColorMap.set(route.ShortName, route.Color);
+    routeColorMap.set(route.LongName, route.Color);
+    routeColorMap.set(route.RouteId.toString(), route.Color);
+  });
+
   if (normalizedDestinations.length === 1) {
     const finalDestination = normalizedDestinations[0];
     if (!finalDestination) {
       throw new Error("Destination is required");
     }
+    const itineraries = planSegmentItineraries(
+      network,
+      origin,
+      finalDestination,
+      maxWalkingDistanceMeters,
+      limit
+    );
+
+    // Add colors to itineraries
+    itineraries.forEach((itinerary) => {
+      if (itinerary.routeNumber && itinerary.routeNumber !== 'Walk') {
+        itinerary.routeColor =
+          routeColorMap.get(itinerary.routeNumber) ??
+          routeColorMap.get(itinerary.routeName ?? "") ??
+          DEFAULT_ROUTE_COLOR;
+      } else if (itinerary.routeNumber === 'Walk') {
+        itinerary.routeColor = WALKING_COLOR;
+      } else {
+        itinerary.routeColor = DEFAULT_ROUTE_COLOR;
+      }
+
+      itinerary.legs.forEach((leg) => {
+        if (leg.type === "bus" && leg.routeNumber) {
+          leg.routeColor =
+            routeColorMap.get(leg.routeNumber) ??
+            routeColorMap.get(leg.routeName ?? "") ??
+            DEFAULT_ROUTE_COLOR;
+        } else if (leg.type === "walk") {
+          leg.routeColor = WALKING_COLOR;
+        }
+      });
+    });
+
     return {
       generatedAt: new Date().toISOString(),
-      itineraries: planSegmentItineraries(
-        network,
-        origin,
-        finalDestination,
-        maxWalkingDistanceMeters,
-        limit
-      ),
+      itineraries,
     };
   }
 
@@ -433,6 +474,13 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
       : entry.firstSegment?.routeName;
 
     const routeNumber = isMultiSegment ? undefined : entry.firstSegment?.routeNumber;
+    const routeColor = routeNumber && routeNumber !== 'Walk'
+      ? routeColorMap.get(routeNumber) ??
+        routeColorMap.get(routeName ?? "") ??
+        DEFAULT_ROUTE_COLOR
+      : routeNumber === 'Walk'
+      ? WALKING_COLOR
+      : DEFAULT_ROUTE_COLOR;
 
     return {
       legs: entry.legs,
@@ -441,9 +489,23 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
       routeId: isMultiSegment ? undefined : entry.firstSegment?.routeId,
       routeName,
       routeNumber,
+      routeColor,
       startStopId: entry.firstSegment?.startStopId,
       endStopId: entry.lastSegment?.endStopId,
     };
+  });
+
+  // Add colors to legs
+  itineraries.forEach((itinerary) => {
+    itinerary.legs.forEach((leg) => {
+      if (leg.type === "bus" && leg.routeNumber) {
+        leg.routeColor = routeColorMap.get(leg.routeNumber) ??
+                        routeColorMap.get(leg.routeName ?? "") ??
+                        DEFAULT_ROUTE_COLOR;
+      } else if (leg.type === "walk") {
+        leg.routeColor = WALKING_COLOR;
+      }
+    });
   });
 
   itineraries.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);

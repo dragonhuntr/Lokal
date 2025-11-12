@@ -27,10 +27,7 @@ async function seedRoutesAndStops() {
 
   // Clear dependent tables first to avoid FK conflicts.
   // Delete in order of dependencies: deepest first
-  await prisma.alert.deleteMany();
-  await prisma.trip.deleteMany();
-  await prisma.savedRoute.deleteMany();
-  await prisma.feedback.deleteMany();
+  await prisma.savedItem.deleteMany();
   await prisma.stop.deleteMany();
   await prisma.route.deleteMany();
 

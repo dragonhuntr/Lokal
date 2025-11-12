@@ -2,11 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Marker, Source, type LayerProps, type MapRef } from "react-map-gl/mapbox";
-import type {
-  ColorSpecification,
-  DataDrivenPropertyValueSpecification,
-  ExpressionSpecification,
-} from "mapbox-gl";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { env } from "@/env";
@@ -14,8 +9,7 @@ import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import type { LocationSearchResult } from "./routes-sidebar";
 import { BusInfoPopup } from "./bus-info-popup";
-import type { RouteDetails, RouteCoordinate } from "@/server/bus-api";
-import { createBus3DLayer } from "./bus-3d-layer";
+import type { RouteDetails } from "@/server/bus-api";
 import type { PlanItinerary } from "@/server/routing/service";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
@@ -26,6 +20,8 @@ interface MapboxMapProps {
   journeyStops?: LocationSearchResult[] | null;
   userLocation?: { latitude: number; longitude: number } | null;
   selectedItinerary?: PlanItinerary | null;
+  savedJourneyOrigin?: { latitude: number; longitude: number } | null;
+  savedJourneyDestination?: { latitude: number; longitude: number } | null;
 }
 
 interface NavigationRouteGeoJSON {
@@ -64,9 +60,6 @@ const DEFAULT_VIEW = {
 const ROUTE_SOURCE_ID = "selected-route";
 const ROUTE_OUTLINE_LAYER_ID = "selected-route-outline";
 const ROUTE_LINE_LAYER_ID = "selected-route-line";
-const BUS_SOURCE_ID = "bus-positions";
-const BUS_LAYER_ID = "bus-3d-layer";
-const BUS_MODEL_SCALE: [number, number, number] = [18, 18, 18];
 
 const NAVIGATION_SOURCE_ID = "navigation-route";
 const NAVIGATION_LINE_LAYER_ID = "navigation-route-line";
@@ -87,6 +80,8 @@ export function MapboxMap({
   journeyStops: journeyStopsProp,
   userLocation,
   selectedItinerary,
+  savedJourneyOrigin,
+  savedJourneyDestination,
 }: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -98,7 +93,10 @@ export function MapboxMap({
   const hasCenteredUserRef = useRef(false);
   const mapRef = useRef<MapRef | null>(null);
   const bus3DLayerRef = useRef<mapboxgl.CustomLayerInterface | null>(null);
-  const journeyStopList = Array.isArray(journeyStopsProp) ? journeyStopsProp : [];
+  const journeyStopList = useMemo(
+    () => (Array.isArray(journeyStopsProp) ? journeyStopsProp : []),
+    [journeyStopsProp]
+  );
 
   const routeId = selectedRoute?.RouteId;
 
@@ -114,7 +112,7 @@ export function MapboxMap({
     { routeId: routeId ?? 0 },
     {
       enabled: routeId !== undefined && routeId !== null,
-      refetchInterval: 10_000,
+      refetchInterval: 30_000, // 30 seconds - better for battery and bandwidth
       select: (data) => ({
         ...data,
         Vehicles: data.Vehicles?.filter(
@@ -171,31 +169,6 @@ export function MapboxMap({
     };
   }, [routeShape]);
 
-  const busGeoJson = useMemo(() => {
-    if (!routeDetails?.Vehicles?.length) return null;
-
-    const features = routeDetails.Vehicles.map((vehicle) => ({
-      type: "Feature" as const,
-      id: `vehicle-${vehicle.VehicleId}`,
-      properties: {
-        vehicleId: vehicle.VehicleId,
-        name: vehicle.Name,
-        rotation: [0, 0, vehicle.Heading ?? 0] as [number, number, number],
-        scale: BUS_MODEL_SCALE,
-        translation: [0, 0, 0] as [number, number, number],
-        color: routeColor,
-      },
-      geometry: {
-        type: "Point" as const,
-        coordinates: [vehicle.Longitude, vehicle.Latitude],
-      },
-    }));
-
-    return {
-      type: "FeatureCollection" as const,
-      features,
-    };
-  }, [routeDetails?.Vehicles, routeColor]);
 
   const routeOutlineLayer: LayerProps = useMemo(
     () => ({
@@ -234,30 +207,9 @@ export function MapboxMap({
   );
 
 
-  const handleMapClick = useCallback(
-    (event: mapboxgl.MapLayerMouseEvent) => {
-      const mapInstance = mapRef.current?.getMap();
-      if (!mapInstance) return;
-
-      // Check if we clicked on the bus layer
-      const features = mapInstance.queryRenderedFeatures(event.point, {
-        layers: [BUS_LAYER_ID],
-      });
-
-      if (features && features.length > 0) {
-        const feature = features[0];
-        const vehicleId = feature?.properties?.vehicleId as number | undefined;
-
-        if (vehicleId && routeDetails?.Vehicles) {
-          const vehicle = routeDetails.Vehicles.find((v) => v.VehicleId === vehicleId);
-          if (vehicle) {
-            setSelectedVehicle(vehicle);
-          }
-        }
-      }
-    },
-    [routeDetails?.Vehicles]
-  );
+  const handleMapClick = useCallback(() => {
+    // Map click handler - currently unused but kept for future features
+  }, []);
 
   // Click handler for 3D bus models
   useEffect(() => {
@@ -364,8 +316,11 @@ export function MapboxMap({
       }
 
       if (!bounds.isEmpty()) {
+        const isMobile = window.innerWidth < 640;
         mapInstance.fitBounds(bounds, {
-          padding: { top: 80, bottom: 80, left: 120, right: 120 },
+          padding: isMobile
+            ? { top: 40, bottom: 40, left: 60, right: 60 }
+            : { top: 80, bottom: 80, left: 120, right: 120 },
           maxZoom: 17,
           duration: 900,
         });
@@ -414,8 +369,48 @@ export function MapboxMap({
         duration: 900,
         essential: true,
       });
+      return;
     }
-  }, [mapLoaded, selectedRoute, selectedLocation, navigationRoute, routeGeoJson, journeyStopList]);
+
+    // Reset view when no route is selected and no other visualization is active
+    // Match the initial page load behavior: center on user location if available, otherwise use default view
+    if (
+      !selectedRoute &&
+      !selectedItinerary &&
+      !navigationRoute?.features?.length &&
+      !journeyStopList.length &&
+      !selectedLocation
+    ) {
+      if (userLocation) {
+        // Match initial load: center on user location with zoom at least 16, preserving pitch and bearing
+        // Same logic as initial page load: Math.max(prev.zoom, 16) where prev.zoom is DEFAULT_VIEW.zoom (15)
+        mapInstance.flyTo({
+          center: [userLocation.longitude, userLocation.latitude],
+          zoom: Math.max(DEFAULT_VIEW.zoom, 16),
+          pitch: DEFAULT_VIEW.pitch,
+          bearing: DEFAULT_VIEW.bearing,
+          duration: 900,
+          essential: true,
+        });
+      } else {
+        // Reset to default view (initial page load state)
+        mapInstance.flyTo({
+          ...DEFAULT_VIEW,
+          duration: 900,
+          essential: true,
+        });
+      }
+    }
+  }, [
+    mapLoaded,
+    selectedRoute,
+    selectedLocation,
+    navigationRoute,
+    routeGeoJson,
+    journeyStopList,
+    selectedItinerary,
+    userLocation,
+  ]);
 
   const navigationLineLayer = useMemo<LayerProps>(
     () => ({
@@ -440,8 +435,11 @@ export function MapboxMap({
   const [itineraryDirections, setItineraryDirections] = useState<NavigationRouteGeoJSON | null>(null);
   const itineraryRequestIdRef = useRef(0);
 
+  // Use saved origin if userLocation is unavailable (for saved journeys without location access)
+  const effectiveOriginForItinerary = userLocation ?? savedJourneyOrigin;
+
   useEffect(() => {
-    if (!selectedItinerary?.legs?.length || !userLocation) {
+    if (!selectedItinerary?.legs?.length || !effectiveOriginForItinerary) {
       setItineraryDirections(null);
       return;
     }
@@ -452,11 +450,11 @@ export function MapboxMap({
 
     const fetchItineraryDirections = async () => {
       try {
-        // Build coordinate list: user location + all leg endpoints
+        // Build coordinate list: effective origin + all leg endpoints
         const coordinates: string[] = [];
 
-        // Add user location as the starting point
-        coordinates.push(`${userLocation.longitude},${userLocation.latitude}`);
+        // Add effective origin as the starting point (userLocation or savedJourneyOrigin)
+        coordinates.push(`${effectiveOriginForItinerary.longitude},${effectiveOriginForItinerary.latitude}`);
 
         // Add each leg's endpoint
         selectedItinerary.legs.forEach((leg) => {
@@ -516,7 +514,7 @@ export function MapboxMap({
     return () => {
       controller.abort();
     };
-  }, [selectedItinerary, userLocation]);
+  }, [selectedItinerary, effectiveOriginForItinerary]);
 
   // Build GeoJSON for selected itinerary with colored segments based on leg types
   const itineraryGeoJson = useMemo(() => {
@@ -644,8 +642,11 @@ export function MapboxMap({
     }
 
     if (!bounds.isEmpty()) {
+      const isMobile = window.innerWidth < 640;
       mapInstance.fitBounds(bounds, {
-        padding: { top: 80, bottom: 80, left: 120, right: 120 },
+        padding: isMobile
+          ? { top: 40, bottom: 40, left: 60, right: 60 }
+          : { top: 80, bottom: 80, left: 120, right: 120 },
         maxZoom: 16,
         duration: 900,
       });
@@ -674,7 +675,50 @@ export function MapboxMap({
           </Source>
         )}
 
-        {/* Render buses as simple SVG markers */}
+        {/* Render stops for the selected route */}
+        {selectedRoute &&
+          routeDetails?.Stops?.map((stop, index) => {
+            const isFirst = index === 0;
+            const isLast = index === (routeDetails.Stops?.length ?? 0) - 1;
+            
+            return (
+              <Marker
+                key={stop.StopId}
+                latitude={stop.Latitude}
+                longitude={stop.Longitude}
+                anchor="center"
+              >
+                <div className="group relative flex items-center justify-center">
+                  {/* Stop marker with different styles for first/last stops */}
+                  <div className="flex items-center justify-center">
+                    <span
+                      className={`inline-block rounded-full border-2 border-white shadow-lg transition-all hover:scale-125 ${
+                        isFirst || isLast
+                          ? "h-5 w-5"
+                          : "h-3 w-3"
+                      }`}
+                      style={{
+                        backgroundColor: routeColor,
+                      }}
+                      title={stop.Name}
+                    />
+                  </div>
+
+                  {/* Tooltip with stop name - shows on hover */}
+                  <div className="pointer-events-none absolute bottom-full mb-2 hidden w-max max-w-xs rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
+                    <div className="font-semibold">{stop.Name}</div>
+                    {stop.Description && (
+                      <div className="text-[10px] text-gray-300">{stop.Description}</div>
+                    )}
+                    {/* Arrow pointing down */}
+                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                  </div>
+                </div>
+              </Marker>
+            );
+          })}
+
+        {/* Render buses as simple SVG markers - rendered after stops so they appear on top */}
         {selectedRoute &&
           routeDetails?.Vehicles?.map((vehicle) => (
             <Marker
@@ -690,7 +734,7 @@ export function MapboxMap({
                   transform: `rotate(${vehicle.Heading ?? 0}deg)`,
                 }}
               >
-                <svg width="40" height="40" viewBox="0 0 40 40">
+                <svg width="56" height="56" viewBox="0 0 40 40">
                   {/* Bus body */}
                   <rect
                     x="10"
@@ -700,16 +744,16 @@ export function MapboxMap({
                     rx="2"
                     fill={routeColor}
                     stroke="#fff"
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                   />
                   {/* Windows */}
                   <rect x="12" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
                   <rect x="22" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
                   {/* Wheels */}
-                  <circle cx="15" cy="28" r="3" fill="#333" />
-                  <circle cx="25" cy="28" r="3" fill="#333" />
+                  <circle cx="15" cy="28" r="3.5" fill="#333" />
+                  <circle cx="25" cy="28" r="3.5" fill="#333" />
                   {/* Direction indicator (front) */}
-                  <rect x="18" y="10" width="4" height="2" fill="#fff" />
+                  <rect x="18" y="10" width="4" height="2.5" fill="#fff" />
                 </svg>
               </div>
             </Marker>
@@ -837,6 +881,26 @@ export function MapboxMap({
             <div className="relative flex items-center justify-center">
               <span className="absolute h-8 w-8 rounded-full bg-sky-400/40 blur-md" />
               <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-sky-500 shadow-md" />
+            </div>
+          </Marker>
+        )}
+        
+        {/* Show saved origin marker when viewing saved journey without location access */}
+        {!userLocation && savedJourneyOrigin && (
+          <Marker latitude={savedJourneyOrigin.latitude} longitude={savedJourneyOrigin.longitude} anchor="center">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute h-8 w-8 rounded-full bg-green-400/40 blur-md" />
+              <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-green-500 shadow-md" />
+            </div>
+          </Marker>
+        )}
+        
+        {/* Show saved destination marker when viewing saved journey without location access */}
+        {!userLocation && savedJourneyDestination && (
+          <Marker latitude={savedJourneyDestination.latitude} longitude={savedJourneyDestination.longitude} anchor="bottom">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute h-8 w-8 rounded-full bg-blue-500/30 blur-md" />
+              <span className="inline-block h-4 w-4 rounded-full border-2 border-white bg-blue-600 shadow-lg" />
             </div>
           </Marker>
         )}
