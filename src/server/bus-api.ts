@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 import { db } from "@/server/db";
-import { generateFakeBuses, isDevMode } from "@/server/dev-bus-data";
+import { generateFakeBuses, shouldUseFakeBuses } from "@/server/dev-bus-data";
 import { getCached, getCachedWithJitter } from "@/lib/redis";
 import { CACHE_KEYS, CACHE_TTL } from "@/lib/cache-keys";
 
 // Log dev mode status on module load
-if (isDevMode()) {
+if (shouldUseFakeBuses()) {
   console.log("[DEV MODE] ✅ Fake buses enabled - NODE_ENV:", process.env.NODE_ENV);
 } else {
   console.log("[PROD MODE] Using real bus data - NODE_ENV:", process.env.NODE_ENV);
@@ -228,49 +228,56 @@ export const parseKmlToRouteData = (kmlText: string): RouteData => {
 
 export const fetchRoutes = async (): Promise<Route[]> => {
   try {
-    const response = await fetch(
-      'https://emta.availtec.com/InfoPoint/rest/Routes/GetVisibleRoutes',
-      { headers: { Accept: 'application/json' }, cache: 'no-store' }
+    // Use Redis cache with cache-aside pattern
+    return await getCached<Route[]>(
+      CACHE_KEYS.ROUTES,
+      async () => {
+        const response = await fetch(
+          'https://emta.availtec.com/InfoPoint/rest/Routes/GetVisibleRoutes',
+          { headers: { Accept: 'application/json' }, cache: 'no-store' }
+        );
+
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const RawRouteSchema = z.object({
+          RouteId: z.coerce.number(),
+          ShortName: z.coerce.string(),
+          LongName: z.coerce.string().optional().default(""),
+          Description: z.union([z.string(), z.null()]).optional(),
+          Color: z.coerce.string().optional().default(""),
+          TextColor: z.coerce.string().optional().default(""),
+          IsVisible: z.preprocess((v) => {
+            if (typeof v === 'boolean') return v;
+            if (typeof v === 'number') return v !== 0;
+            if (typeof v === 'string') return v.toLowerCase() === 'true' || v === '1';
+            return false;
+          }, z.boolean()).optional().default(true),
+        }).passthrough();
+
+        const json: unknown = await response.json();
+        const parsed = z.array(RawRouteSchema).parse(json);
+
+        const toHex = (str: string) => {
+          const s = str.trim();
+          return s.startsWith('#') ? s.slice(1) : s;
+        };
+
+        const routes: Route[] = parsed.map((r) => ({
+          RouteId: r.RouteId,
+          ShortName: r.ShortName,
+          LongName: r.LongName ?? "",
+          Description: typeof r.Description === 'string' ? r.Description : "",
+          Color: toHex(r.Color ?? ""),
+          TextColor: toHex(r.TextColor ?? ""),
+          IsVisible: r.IsVisible ?? true,
+        }));
+
+        return routes;
+      },
+      CACHE_TTL.ROUTES
     );
-
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-
-    const RawRouteSchema = z.object({
-      RouteId: z.coerce.number(),
-      ShortName: z.coerce.string(),
-      LongName: z.coerce.string().optional().default(""),
-      Description: z.union([z.string(), z.null()]).optional(),
-      Color: z.coerce.string().optional().default(""),
-      TextColor: z.coerce.string().optional().default(""),
-      IsVisible: z.preprocess((v) => {
-        if (typeof v === 'boolean') return v;
-        if (typeof v === 'number') return v !== 0;
-        if (typeof v === 'string') return v.toLowerCase() === 'true' || v === '1';
-        return false;
-      }, z.boolean()).optional().default(true),
-    }).passthrough();
-
-    const json: unknown = await response.json();
-    const parsed = z.array(RawRouteSchema).parse(json);
-
-    const toHex = (str: string) => {
-      const s = str.trim();
-      return s.startsWith('#') ? s.slice(1) : s;
-    };
-
-    const routes: Route[] = parsed.map((r) => ({
-      RouteId: r.RouteId,
-      ShortName: r.ShortName,
-      LongName: r.LongName ?? "",
-      Description: typeof r.Description === 'string' ? r.Description : "",
-      Color: toHex(r.Color ?? ""),
-      TextColor: toHex(r.TextColor ?? ""),
-      IsVisible: r.IsVisible ?? true,
-    }));
-
-    return routes;
   } catch (error) {
     console.error("Error fetching routes:", error);
     return [];
@@ -278,85 +285,92 @@ export const fetchRoutes = async (): Promise<Route[]> => {
 };
 
 export const fetchRouteDetails = async (routeId: number): Promise<RouteDetails> => {
-  // Fetch from Availtec API for complete route details including vehicles
-  try {
-    const response = await fetch(
-      `https://emta.availtec.com/InfoPoint/rest/RouteDetails/Get/${routeId}`,
-      { headers: { Accept: 'application/json' }, cache: 'no-store' }
-    );
+  // Use Redis cache with cache-aside pattern
+  return await getCached<RouteDetails>(
+    CACHE_KEYS.ROUTE_DETAILS(routeId),
+    async () => {
+      // Fetch from Availtec API for complete route details including vehicles
+      try {
+        const response = await fetch(
+          `https://emta.availtec.com/InfoPoint/rest/RouteDetails/Get/${routeId}`,
+          { headers: { Accept: 'application/json' }, cache: 'no-store' }
+        );
 
-    if (!response.ok) {
-      throw new Error(`Availtec API request failed with status ${response.status}`);
-    }
+        if (!response.ok) {
+          throw new Error(`Availtec API request failed with status ${response.status}`);
+        }
 
-    const data = (await response.json()) as RouteDetails;
+        const data = (await response.json()) as RouteDetails;
 
-    // In dev mode, replace with fake buses for testing
-    if (isDevMode()) {
-      console.log(`[DEV MODE] fetchRouteDetails - Route ${routeId}: ${data.Stops?.length ?? 0} stops, ${data.Vehicles?.length ?? 0} real buses`);
-      data.Vehicles = generateFakeBuses({
-        routeId,
-        stops: data.Stops,
-        color: data.Color,
-      });
-      console.log(`[DEV MODE] Generated ${data.Vehicles.length} fake buses for route ${routeId}`);
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`Error fetching route details from Availtec for route ${routeId}:`, error);
-
-    // Fallback to database if Availtec fails
-    try {
-      const route = await db.route.findUnique({
-        where: { id: `route-${routeId}` },
-        include: {
-          stops: {
-            orderBy: { sequence: "asc" },
-          },
-        },
-      });
-
-      if (!route) {
-        throw new Error(`Route ${routeId} not found in database or Availtec API`);
-      }
-
-      const stops: RouteDetails["Stops"] = route.stops.map((stop) => ({
-        Description: stop.name,
-        IsTimePoint: true,
-        Latitude: stop.latitude,
-        Longitude: stop.longitude,
-        Name: stop.name,
-        StopId: stop.sequence,
-        StopRecordId: stop.sequence,
-      }));
-
-      // In dev mode, generate fake buses for testing
-      const vehicles = isDevMode()
-        ? generateFakeBuses({
+        // In dev mode, replace with fake buses for testing (if enabled)
+        if (shouldUseFakeBuses()) {
+          console.log(`[DEV MODE] fetchRouteDetails - Route ${routeId}: ${data.Stops?.length ?? 0} stops, ${data.Vehicles?.length ?? 0} real buses`);
+          data.Vehicles = generateFakeBuses({
             routeId,
-            stops,
-          })
-        : ([] as RouteDetails["Vehicles"]);
+            stops: data.Stops,
+            color: data.Color,
+          });
+          console.log(`[DEV MODE] Generated ${data.Vehicles.length} fake buses for route ${routeId}`);
+        }
 
-      const result: RouteDetails = {
-        Color: "",
-        Directions: [] as RouteDetails["Directions"],
-        GoogleDescription: "",
-        LongName: route.name,
-        RouteAbbreviation: route.number,
-        RouteId: routeId,
-        ShortName: route.number,
-        RouteTraceFilename: "",
-        Stops: stops,
-        Vehicles: vehicles,
-      };
+        return data;
+      } catch (error) {
+        console.error(`Error fetching route details from Availtec for route ${routeId}:`, error);
 
-      return result;
-    } catch (dbError) {
-      throw new Error(`Failed to fetch route ${routeId} from both Availtec API and database: ${String(dbError)}`);
-    }
-  }
+        // Fallback to database if Availtec fails
+        try {
+          const route = await db.route.findUnique({
+            where: { id: `route-${routeId}` },
+            include: {
+              stops: {
+                orderBy: { sequence: "asc" },
+              },
+            },
+          });
+
+          if (!route) {
+            throw new Error(`Route ${routeId} not found in database or Availtec API`);
+          }
+
+          const stops: RouteDetails["Stops"] = route.stops.map((stop) => ({
+            Description: stop.name,
+            IsTimePoint: true,
+            Latitude: stop.latitude,
+            Longitude: stop.longitude,
+            Name: stop.name,
+            StopId: stop.sequence,
+            StopRecordId: stop.sequence,
+          }));
+
+          // In dev mode, generate fake buses for testing (if enabled)
+          const vehicles = shouldUseFakeBuses()
+            ? generateFakeBuses({
+                routeId,
+                stops,
+              })
+            : ([] as RouteDetails["Vehicles"]);
+
+          const result: RouteDetails = {
+            Color: "",
+            Directions: [] as RouteDetails["Directions"],
+            GoogleDescription: "",
+            LongName: route.name,
+            RouteAbbreviation: route.number,
+            RouteId: routeId,
+            ShortName: route.number,
+            RouteTraceFilename: "",
+            Stops: stops,
+            Vehicles: vehicles,
+          };
+
+          return result;
+        } catch (dbError) {
+          throw new Error(`Failed to fetch route ${routeId} from both Availtec API and database: ${String(dbError)}`);
+        }
+      }
+    },
+    CACHE_TTL.ROUTE_DETAILS
+  );
 };
 
 // Zod schemas for departure data validation

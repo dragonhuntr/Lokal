@@ -23,6 +23,7 @@ import { useSavedItems } from "@/trpc/saved-items";
 import type { PlanItinerary } from "@/server/routing/service";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { CACHE_TTL } from "@/lib/cache-keys";
 
 const RESULT_LIMIT = 10;
 const DEBOUNCE_MS = 300;
@@ -163,6 +164,7 @@ export function RoutesSidebar({
   const { data: allVehicles } = api.bus.getAllVehicles.useQuery(undefined, {
     refetchInterval: 60000,
   });
+  const prefetchRouteDetails = api.bus.prefetchRouteDetails.useMutation();
 
   const vehiclesByRoute = useMemo(() => {
     if (!allVehicles) return new Map<number, number>();
@@ -173,6 +175,44 @@ export function RoutesSidebar({
     }
     return map;
   }, [allVehicles]);
+
+  // Track if we've already prefetched to avoid repeated prefetching
+  const hasPrefetchedRef = useRef(false);
+
+  // Prefetch route details when routes are loaded
+  useEffect(() => {
+    if (!routes || routes.length === 0 || hasPrefetchedRef.current) return;
+
+    // Prefetch route details for all routes in batches to avoid overwhelming the system
+    // Process in batches of 10 routes at a time
+    const batchSize = 10;
+    const allRouteIds = routes.map((r) => r.RouteId);
+    
+    // Process batches with a small delay between them
+    const prefetchBatches = async () => {
+      for (let i = 0; i < allRouteIds.length; i += batchSize) {
+        const batch = allRouteIds.slice(i, i + batchSize);
+        prefetchRouteDetails.mutate(
+          { routeIds: batch },
+          {
+            onError: (error: unknown) => {
+              // Silently fail - prefetching is best effort
+              console.debug(`Failed to prefetch route details batch ${i / batchSize + 1}:`, error);
+            },
+          }
+        );
+        // Small delay between batches to avoid overwhelming the server
+        if (i + batchSize < allRouteIds.length) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+    };
+    
+    // Start prefetching in background
+    void prefetchBatches();
+    
+    hasPrefetchedRef.current = true;
+  }, [routes, prefetchRouteDetails]);
 
   // Fetch route details when a route is selected in explore mode
   const { data: routeDetails } = api.bus.getRouteDetails.useQuery(
