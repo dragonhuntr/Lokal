@@ -1,14 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, MapPin, Bus, Bookmark, Clock } from "lucide-react";
+import { X, MapPin, Bus, Bookmark, Clock, Navigation } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 
 const ONBOARDING_STORAGE_KEY = "lokal_onboarding_completed";
 
-export function OnboardingOverlay() {
+interface OnboardingOverlayProps {
+  onRequestLocation?: () => void;
+}
+
+export function OnboardingOverlay({ onRequestLocation }: OnboardingOverlayProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
+  const [locationRequested, setLocationRequested] = useState(false);
 
   useEffect(() => {
     // Check if user has completed onboarding
@@ -27,6 +32,13 @@ export function OnboardingOverlay() {
   const handleSkip = () => {
     localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
     setOpen(false);
+  };
+
+  const handleRequestLocation = () => {
+    if (onRequestLocation) {
+      onRequestLocation();
+      setLocationRequested(true);
+    }
   };
 
   const steps = [
@@ -88,6 +100,23 @@ export function OnboardingOverlay() {
             <Dialog.Description className="mb-6 text-center text-muted-foreground">
               {currentStep?.description}
             </Dialog.Description>
+
+            {/* Location Request Button - Show on first step */}
+            {step === 0 && onRequestLocation && (
+              <div className="mb-6">
+                <button
+                  onClick={handleRequestLocation}
+                  disabled={locationRequested}
+                  className="w-full flex items-center justify-center gap-2 rounded-md border-2 border-blue-500 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Navigation className="h-4 w-4" />
+                  {locationRequested ? "Location permission requested" : "Use my location"}
+                </button>
+                <p className="mt-2 text-xs text-center text-muted-foreground">
+                  Enable location access for personalized route planning
+                </p>
+              </div>
+            )}
 
             <div className="mb-6 flex justify-center gap-2">
               {steps.map((_, index) => (

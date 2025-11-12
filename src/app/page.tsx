@@ -41,6 +41,7 @@ export default function Home() {
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
   const [viewingSavedJourney, setViewingSavedJourney] = useState(false);
   const [sharedJourneyDestinationName, setSharedJourneyDestinationName] = useState<string | null>(null);
+  const [locationWatcherId, setLocationWatcherId] = useState<number | null>(null);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -194,49 +195,130 @@ export default function Home() {
     void loadJourney();
   }, [searchParams, session.status]);
 
-  useEffect(() => {
+  // Request location permission and start watching
+  const requestLocation = useCallback(() => {
     if (!("geolocation" in navigator)) {
       console.warn("Geolocation not supported in this browser");
-      return undefined;
+      return;
     }
 
-    let watcherId: number | null = null;
+    // Check if we're in a secure context (HTTPS or localhost)
+    const isSecureContext = window.isSecureContext || window.location.protocol === "https:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (!isSecureContext) {
+      console.error("Geolocation requires HTTPS. Current protocol:", window.location.protocol);
+      alert("Location access requires HTTPS. Please use https:// or localhost.");
+      return;
+    }
+
+    // Clear any existing watcher
+    if (locationWatcherId !== null) {
+      navigator.geolocation.clearWatch(locationWatcherId);
+    }
+
     let errorCount = 0;
     const MAX_ERRORS = 3;
 
-    const startWatching = () => {
-      watcherId = navigator.geolocation.watchPosition(
-        (position) => {
-          errorCount = 0;
-          const { latitude, longitude } = position.coords;
-          setUserLocation({ latitude, longitude });
-        },
-        (error) => {
-          errorCount++;
-          console.error(`Geolocation error (${errorCount}/${MAX_ERRORS}):`, error);
+    console.log("Requesting location permission...");
 
-          if (errorCount >= MAX_ERRORS && watcherId !== null) {
-            navigator.geolocation.clearWatch(watcherId);
-            watcherId = null;
-            console.error("Geolocation disabled due to repeated errors");
+    // First, get current position (this triggers permission prompt on mobile Safari)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        console.log("Location permission granted, position received:", position.coords);
+        const { latitude, longitude } = position.coords;
+        setUserLocation({ latitude, longitude });
+
+        // Then start watching for updates
+        const watcherId = navigator.geolocation.watchPosition(
+          (pos) => {
+            errorCount = 0;
+            setUserLocation({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            });
+          },
+          (error) => {
+            errorCount++;
+            console.error(`Geolocation watch error (${errorCount}/${MAX_ERRORS}):`, error);
+
+            if (errorCount >= MAX_ERRORS && watcherId !== null) {
+              navigator.geolocation.clearWatch(watcherId);
+              setLocationWatcherId(null);
+              console.error("Geolocation disabled due to repeated errors");
+            }
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 1000,
           }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 1000,
+        );
+
+        setLocationWatcherId(watcherId);
+      },
+      (error) => {
+        // Safari may provide error object differently - handle safely
+        // Error object should have: code (1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT)
+        const errorCode = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+        const errorMessage = typeof error === "object" && error !== null && "message" in error ? error.message : String(error);
+        
+        // Log the full error object for debugging
+        console.error("Geolocation error object:", error);
+        console.error("Error type:", typeof error);
+        console.error("Error code:", errorCode);
+        console.error("Error message:", errorMessage);
+        
+        // Handle different error types
+        if (errorCode === 1 || errorMessage?.toLowerCase().includes("denied")) {
+          // PERMISSION_DENIED - Safari often returns this without showing prompt if previously denied
+          console.warn("PERMISSION_DENIED: Location permission was denied or blocked by Safari");
+          console.warn("This usually means permission was previously denied. To reset:");
+          console.warn("1. iOS: Settings > Safari > Clear History and Website Data");
+          console.warn("2. Or: Settings > Privacy & Security > Location Services > Safari Websites > Reset");
+          console.warn("3. Then reload the page and try again");
+          
+          // Show user-friendly alert with instructions
+          if (typeof window !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+            alert(
+              "Location access was denied. To enable:\n\n" +
+              "1. Go to Settings > Safari\n" +
+              "2. Tap 'Clear History and Website Data'\n" +
+              "3. Or go to Settings > Privacy & Security > Location Services > Safari Websites\n" +
+              "4. Set to 'Ask' or 'While Using App'\n" +
+              "5. Reload this page and try again"
+            );
+          }
+        } else if (errorCode === 2) {
+          // POSITION_UNAVAILABLE
+          console.warn("POSITION_UNAVAILABLE: Location unavailable. Check device location services.");
+        } else if (errorCode === 3) {
+          // TIMEOUT
+          console.warn("TIMEOUT: Location request timed out. Try again.");
+        } else {
+          // Unknown error - log everything
+          console.warn("Unknown geolocation error:", {
+            error,
+            errorType: typeof error,
+            errorKeys: typeof error === "object" && error !== null ? Object.keys(error) : [],
+            errorString: String(error),
+          });
         }
-      );
-    };
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000, // Increased timeout for Safari
+        maximumAge: 0, // Don't use cached position
+      }
+    );
+  }, [locationWatcherId]);
 
-    startWatching();
-
+  // Cleanup watcher on unmount
+  useEffect(() => {
     return () => {
-      if (watcherId !== null) {
-        navigator.geolocation.clearWatch(watcherId);
+      if (locationWatcherId !== null) {
+        navigator.geolocation.clearWatch(locationWatcherId);
       }
     };
-  }, []);
+  }, [locationWatcherId]);
 
   useEffect(() => {
     if (!journeyStops.length) {
@@ -333,7 +415,7 @@ export default function Home() {
 
   return (
     <>
-      <OnboardingOverlay />
+      <OnboardingOverlay onRequestLocation={requestLocation} />
       <main className="relative min-h-screen">
         <RoutesSidebar
         mode={mode}

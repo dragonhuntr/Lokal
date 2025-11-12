@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
+import { motion, useMotionValue, useTransform } from "framer-motion";
+import type { PanInfo } from "framer-motion";
 import { ArrowLeft, Bookmark, Bus, MapPin, Menu, Search, X } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
@@ -134,6 +136,9 @@ export function RoutesSidebar({
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<SidebarView>("routes");
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(600);
+  const y = useMotionValue(0);
   const [placeQuery, setPlaceQuery] = useState("");
   const [placeResults, setPlaceResults] = useState<PlaceResult[]>([]);
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
@@ -154,8 +159,50 @@ export function RoutesSidebar({
   useEffect(() => {
     if (!isDesktop) {
       setOpen(false);
+      // Keep mobileSheetOpen as is (starts closed)
+    } else {
+      setOpen(true);
     }
   }, [isDesktop]);
+
+  // Calculate sheet height based on viewport and update on resize
+  useEffect(() => {
+    const updateSheetHeight = () => {
+      setSheetHeight(window.innerHeight * 0.85);
+    };
+    updateSheetHeight();
+    window.addEventListener("resize", updateSheetHeight);
+    return () => window.removeEventListener("resize", updateSheetHeight);
+  }, []);
+
+  // Handle height for the drag handle (64px = h-16)
+  const handleHeight = 64;
+  // When closed, sheet is positioned so only the handle shows (sheetHeight - handleHeight)
+  const closedY = useMemo(() => sheetHeight - handleHeight, [sheetHeight]);
+  
+  const handleDragEnd = useCallback((_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const threshold = sheetHeight * 0.25;
+    const dragOffset = y.get();
+    
+    // y.get() gives us the drag offset from the animated position
+    // If currently open (at y=0), positive offset means dragging down
+    // If currently closed (at closedY), negative offset means dragging up
+    
+    if (mobileSheetOpen) {
+      // Currently open: dragging down closes it
+      if (dragOffset > threshold || info.velocity.y > 500) {
+        setMobileSheetOpen(false);
+      }
+    } else {
+      // Currently closed: dragging up opens it
+      if (dragOffset < -threshold || info.velocity.y < -500) {
+        setMobileSheetOpen(true);
+      }
+    }
+    
+    // Reset drag value after state update
+    y.set(0);
+  }, [sheetHeight, mobileSheetOpen, y]);
 
   const activeDestination = journeyStops.length
     ? journeyStops[journeyStops.length - 1]
@@ -515,46 +562,23 @@ export function RoutesSidebar({
     [onSelectItinerary]
   );
 
-  return (
-    <div
-      className={cn(
-        "pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4",
-        "sm:absolute sm:inset-auto sm:left-4 sm:top-4 sm:bottom-auto sm:right-auto sm:px-0 sm:justify-start"
+  const sidebarContent = (
+    <>
+      {isDesktop && (
+        <div className="mb-3 flex items-center justify-between">
+          <Dialog.Title className="flex items-center">
+            <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
+          </Dialog.Title>
+          <Dialog.Close asChild>
+            <button
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-transparent text-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+              aria-label="Close sidebar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </Dialog.Close>
+        </div>
       )}
-    >
-      <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Trigger asChild>
-          <button
-            className="pointer-events-auto inline-flex w-full max-w-sm items-center justify-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-semibold text-background shadow-lg transition hover:bg-foreground/90 focus:outline-2 focus:outline-offset-2 focus:outline-ring sm:h-11 sm:w-auto sm:max-w-none sm:rounded-md sm:bg-white/90 sm:px-3 sm:py-0 sm:text-sm sm:font-medium sm:text-foreground sm:shadow-md sm:hover:bg-white"
-            aria-label="Toggle sidebar"
-          >
-            <Menu className="h-4 w-4" />
-            <span className="sm:hidden">Open transit</span>
-            <span className="hidden sm:inline">Explore</span>
-          </button>
-        </Dialog.Trigger>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-background/60 backdrop-blur-sm sm:hidden" />
-          <Dialog.Content
-            className={cn(
-              "pointer-events-auto fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-3xl border bg-background p-4 shadow-xl focus:outline-none",
-              "sm:inset-auto sm:bottom-auto sm:left-4 sm:top-4 sm:max-h-[calc(100vh-2rem)] sm:w-auto sm:min-w-[340px] sm:max-w-[420px] sm:rounded-xl sm:border sm:p-3 md:max-w-[600px]"
-            )}
-          >
-            {!isDesktop && <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" aria-hidden />}
-            <div className="mb-3 flex items-center justify-between">
-              <Dialog.Title className="flex items-center">
-                <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
-              </Dialog.Title>
-              <Dialog.Close asChild>
-                <button
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/70 text-muted-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring sm:h-11 sm:w-11 sm:rounded-md sm:bg-transparent sm:text-foreground"
-                  aria-label="Close sidebar"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </Dialog.Close>
-            </div>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Mode Toggle */}
@@ -803,11 +827,85 @@ export function RoutesSidebar({
               )}
               </div>
             </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop: Use Dialog */}
+      <div
+        className={cn(
+          "pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4",
+          "sm:absolute sm:inset-auto sm:left-4 sm:top-4 sm:bottom-auto sm:right-auto sm:px-0 sm:justify-start",
+          isDesktop ? "block" : "hidden"
+        )}
+      >
+        <Dialog.Root open={open} onOpenChange={setOpen}>
+          <Dialog.Trigger asChild>
+            <button
+              className="pointer-events-auto inline-flex h-11 w-auto items-center justify-center gap-2 rounded-md bg-white/90 px-3 py-0 text-sm font-medium text-foreground shadow-md transition hover:bg-white focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+              aria-label="Toggle sidebar"
+            >
+              <Menu className="h-4 w-4" />
+              <span>Explore</span>
+            </button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Content
+              className={cn(
+                "pointer-events-auto fixed inset-auto left-4 top-4 z-50 flex max-h-[calc(100vh-2rem)] w-auto min-w-[340px] max-w-[420px] flex-col overflow-hidden rounded-xl border bg-background p-3 shadow-xl focus:outline-none md:max-w-[600px]"
+              )}
+            >
+              {sidebarContent}
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      </div>
+
+      {/* Mobile: Logo positioned at top-left */}
+      {!isDesktop && (
+        <div className="fixed left-4 top-4 z-50 pointer-events-none">
+          <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
+        </div>
+      )}
+
+      {/* Mobile: Use Framer Motion Bottom Sheet */}
+      {!isDesktop && (
+        <motion.div
+          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-3xl border-t border-l border-r bg-background shadow-xl"
+          style={{
+            y: y,
+          }}
+          initial={false}
+          animate={{
+            y: mobileSheetOpen ? 0 : closedY,
+          }}
+          transition={{
+            type: "spring",
+            damping: 30,
+            stiffness: 300,
+          }}
+          drag="y"
+          dragConstraints={{ top: 0, bottom: closedY }}
+          dragElastic={0.1}
+          onDragEnd={handleDragEnd}
+          onClick={() => {
+            // If closed and clicking on handle area, open
+            if (!mobileSheetOpen && y.get() >= closedY - handleHeight) {
+              setMobileSheetOpen(true);
+            }
+          }}
+        >
+          <div className="flex flex-col overflow-hidden p-4">
+            {/* Drag Handle - Always visible */}
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" aria-hidden />
+            {sidebarContent}
+          </div>
+        </motion.div>
+      )}
+
       <AuthDialog open={authOpen} onOpenChange={setAuthOpen} defaultMode={authDefaultMode} />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
-    </div>
+    </>
   );
 }
