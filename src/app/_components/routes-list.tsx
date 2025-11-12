@@ -15,6 +15,7 @@ interface RoutesListProps {
   isLoading: boolean;
   selectedRouteId?: number;
   vehiclesByRoute: Map<number, number>;
+  hasVehiclesLoaded: boolean;
   onSelectRoute?: (route: RouteSummary) => void;
   requireAuth: (action: () => void | Promise<void>) => void;
 }
@@ -24,6 +25,7 @@ export function RoutesList({
   isLoading,
   selectedRouteId,
   vehiclesByRoute,
+  hasVehiclesLoaded,
   onSelectRoute,
   requireAuth: _requireAuth,
 }: RoutesListProps) {
@@ -31,21 +33,37 @@ export function RoutesList({
 
   const filteredRoutes = useMemo(() => {
     if (!routes) return [];
+    
+    // First filter by active buses (only if vehicles data has loaded)
+    let activeRoutes = routes;
+    if (hasVehiclesLoaded) {
+      activeRoutes = routes.filter((r) => {
+        const vehicleCount = vehiclesByRoute.get(r.RouteId) ?? 0;
+        return vehicleCount > 0;
+      });
+    }
+    
+    // Then filter by search query
     const q = routeQuery.trim().toLowerCase();
-    if (!q) return routes;
-    return routes.filter((r) =>
+    if (!q) return activeRoutes;
+    return activeRoutes.filter((r) =>
       [r.ShortName, r.LongName, r.Description]
         .filter(Boolean)
         .some((value) => value?.toLowerCase().includes(q))
     );
-  }, [routes, routeQuery]);
+  }, [routes, routeQuery, vehiclesByRoute, hasVehiclesLoaded]);
 
   const statusMessage = useMemo(() => {
     if (isLoading) return "Loading routes…";
     if (!routes?.length) return "No routes available.";
-    if (!routeQuery.trim()) return `${routes.length} routes`;
-    return `${filteredRoutes.length} routes match`;
-  }, [isLoading, routes, filteredRoutes, routeQuery]);
+    if (!routeQuery.trim()) {
+      if (hasVehiclesLoaded) {
+        return `${filteredRoutes.length} active route${filteredRoutes.length === 1 ? "" : "s"}`;
+      }
+      return `${routes.length} routes`;
+    }
+    return `${filteredRoutes.length} route${filteredRoutes.length === 1 ? "" : "s"} match`;
+  }, [isLoading, routes, filteredRoutes, routeQuery, hasVehiclesLoaded]);
 
   return (
     <>

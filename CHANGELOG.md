@@ -8,6 +8,40 @@ All notable changes to the Lokal transit app project.
 
 #### 🚀 Performance Optimizations
 
+**Route & Stop Caching**:
+- **Added Redis caching to `fetchRoutes()`** in `src/server/bus-api.ts`:
+  - Routes list now cached with 10-minute TTL
+  - Reduces external API calls for route listings
+  - Uses `CACHE_KEYS.ROUTES` cache key
+  - **Impact**: Faster route list loading, reduced API load
+
+- **Added Redis caching to `fetchRouteDetails()`** in `src/server/bus-api.ts`:
+  - Individual route details cached with 5-minute TTL
+  - Route details include stops, so stops are automatically cached
+  - Uses `CACHE_KEYS.ROUTE_DETAILS(routeId)` cache key pattern
+  - **Impact**: Instant route viewing after initial load, stops cached as part of route data
+
+- **Implemented route prefetching** in `src/app/_components/routes-sidebar.tsx`:
+  - Prefetches route details for all routes when routes list loads
+  - Processes in batches of 10 routes with 100ms delays between batches
+  - Prevents overwhelming the server while warming up cache
+  - Uses `prefetchRouteDetails` tRPC mutation
+  - **Impact**: Routes ready instantly when user views them
+
+- **Enhanced prefetch mutation** in `src/server/api/routers/bus.ts`:
+  - Changed from fire-and-forget to `Promise.allSettled()` await
+  - Ensures cache is populated before mutation returns
+  - Handles individual route failures gracefully
+  - **Impact**: Reliable cache warming, all routes cached properly
+
+**Route Filtering**:
+- **Filter routes with no active buses** in `src/app/_components/routes-list.tsx`:
+  - Only shows routes with at least 1 active bus after vehicle data loads
+  - Shows all routes initially (before vehicles load) to avoid empty state
+  - Updated status message to show "X active routes" count
+  - Added `hasVehiclesLoaded` prop to track vehicle data availability
+  - **Impact**: Cleaner route list, focuses on routes with active service
+
 **Database Performance**:
 - **Added database indexes** to `prisma/schema.prisma`:
   - `@@index([routeId])` on Stop model for 50-90% faster route-based queries
@@ -40,6 +74,13 @@ All notable changes to the Lokal transit app project.
   - Pattern-based cache invalidation
   - Pre-configured cache instances: `apiCache`, `routeCache`, `vehicleCache`
   - **Impact**: Reduces redundant API calls and database queries
+
+- **Redis caching for routes and route details**:
+  - Routes list cached with 10-minute TTL (`CACHE_TTL.ROUTES: 600`)
+  - Route details cached with 5-minute TTL (`CACHE_TTL.ROUTE_DETAILS: 300`)
+  - Stops cached as part of route details (no separate fetch needed)
+  - Prefetching warms cache for all routes on initial load
+  - **Impact**: Routes load instantly from cache, stops included automatically
 
 **HTTP Caching**:
 - **Added cache headers** to API routes:

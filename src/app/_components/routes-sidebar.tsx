@@ -647,6 +647,7 @@ export function RoutesSidebar({
                 isLoading={areRoutesLoading}
                 selectedRouteId={selectedRouteId}
                 vehiclesByRoute={vehiclesByRoute}
+                hasVehiclesLoaded={!!allVehicles}
                 onSelectRoute={onSelectRoute}
                 requireAuth={requireAuth}
               />
