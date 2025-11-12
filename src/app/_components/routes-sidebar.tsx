@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowLeft, Bookmark, Bus, MapPin, Menu, X } from "lucide-react";
+import { ArrowLeft, Bookmark, Bus, MapPin, Menu, Search, X } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
 import { RoutesList } from "@/app/_components/routes-list";
+import { SavedRoutesList } from "@/app/_components/saved-routes-list";
 import { PlaceSearch } from "@/app/_components/place-search";
 import { ItineraryOptions } from "@/app/_components/itinerary-options";
 import { DirectionsSteps } from "@/app/_components/directions-steps";
@@ -137,6 +138,7 @@ export function RoutesSidebar({
   const [placeResults, setPlaceResults] = useState<PlaceResult[]>([]);
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
   const [placesError, setPlacesError] = useState<string | null>(null);
+  const [routeQuery, setRouteQuery] = useState("");
   const requestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
   const previousLocationIdRef = useRef<string | null>(null);
@@ -229,6 +231,14 @@ export function RoutesSidebar({
     if (!selectedRouteId || !routes) return null;
     return routes.find((r) => r.RouteId === selectedRouteId) ?? null;
   }, [selectedRouteId, routes]);
+
+  // Get set of saved route IDs to exclude from active routes
+  const savedRouteIds = useMemo(() => {
+    if (session.status !== "authenticated" || savedItems.routes.length === 0) {
+      return new Set<number>();
+    }
+    return new Set(savedItems.routes.map((sr) => Number(sr.routeId)));
+  }, [session.status, savedItems.routes]);
 
   // View management
   useEffect(() => {
@@ -639,15 +649,48 @@ export function RoutesSidebar({
                 requireAuth={requireAuth}
               />
             ) : mode === "explore" && view === "routes" ? (
-              <RoutesList
-                routes={routes}
-                isLoading={areRoutesLoading}
-                selectedRouteId={selectedRouteId}
-                vehiclesByRoute={vehiclesByRoute}
-                hasVehiclesLoaded={!!allVehicles}
-                onSelectRoute={onSelectRoute}
-                requireAuth={requireAuth}
-              />
+              <>
+                <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
+                  <Search className="h-4 w-4 opacity-60" />
+                  <input
+                    type="search"
+                    value={routeQuery}
+                    onChange={(event) => setRouteQuery(event.target.value)}
+                    placeholder="Search bus lines…"
+                    className="h-11 w-full bg-transparent text-sm outline-none"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
+                  />
+                </div>
+                {session.status === "authenticated" && savedItems.routes.length > 0 && (
+                  <SavedRoutesList
+                    savedRoutes={savedItems.routes}
+                    allRoutes={routes}
+                    selectedRouteId={selectedRouteId}
+                    vehiclesByRoute={vehiclesByRoute}
+                    hasVehiclesLoaded={!!allVehicles}
+                    onSelectRoute={onSelectRoute}
+                    onViewOnMap={(itemId: string) => {
+                      router.push(`/?itemId=${itemId}`);
+                    }}
+                    searchQuery={routeQuery}
+                  />
+                )}
+                <RoutesList
+                  routes={routes}
+                  isLoading={areRoutesLoading}
+                  selectedRouteId={selectedRouteId}
+                  vehiclesByRoute={vehiclesByRoute}
+                  hasVehiclesLoaded={!!allVehicles}
+                  onSelectRoute={onSelectRoute}
+                  requireAuth={requireAuth}
+                  excludeRouteIds={savedRouteIds}
+                  searchQuery={routeQuery}
+                  onSearchQueryChange={setRouteQuery}
+                />
+              </>
             ) : mode === "plan" && view === "places" ? (
               <PlaceSearch
                 placeQuery={placeQuery}
