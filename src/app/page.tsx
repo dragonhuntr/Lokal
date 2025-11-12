@@ -125,68 +125,61 @@ export default function Home() {
     []
   );
 
-  // Handle itemId from URL parameter (for saved journeys/routes)
+  // Handle journeyId from URL parameter (works for both authenticated and public access)
   useEffect(() => {
-    const itemIdParam = searchParams.get("itemId");
-    if (!itemIdParam) {
+    const journeyIdParam = searchParams.get("journeyId");
+    if (!journeyIdParam) {
       return;
     }
 
-    // Wait for session to be loaded
+    // Wait for session to be loaded before checking auth
     if (session.status === "loading") {
       return;
     }
 
-    // Check if user is authenticated
-    if (session.status !== "authenticated" || !session.user?.id) {
-      console.error("Not authenticated - cannot load saved item");
-      return;
-    }
-
-    const userId = session.user.id;
-
-    // Fetch the saved item and display it
-    const loadItem = async () => {
+    const loadJourney = async () => {
       try {
-        const response = await fetch(
-          `/api/user/${encodeURIComponent(userId)}/saved-items/${encodeURIComponent(itemIdParam)}`,
-          { credentials: "include" }
-        );
+        // Use the consolidated endpoint that handles both authenticated and public access
+        const response = await fetch(`/api/journeys/${encodeURIComponent(journeyIdParam)}`, {
+          credentials: "include",
+        });
+        
         if (!response.ok) {
-          console.error("Failed to fetch saved item");
+          console.error("Failed to fetch journey");
           return;
         }
 
         const data = (await response.json()) as {
-          item: {
-            type: "JOURNEY" | "ROUTE";
-            routeId?: string | null;
-            itineraryData?: PlanItinerary | null;
-            originLat?: number | null;
-            originLng?: number | null;
-          };
+          journey?: { itineraryData: PlanItinerary; destinationName?: string | null };
+          route?: { routeId: string };
         };
 
-        if (data.item.type === "JOURNEY" && data.item.itineraryData) {
-          // Reconstruct the journey by setting the itinerary
+        // Handle journey type
+        if (data.journey?.itineraryData) {
           setMode("plan");
-          setPlanItineraries([data.item.itineraryData]);
+          setPlanItineraries([data.journey.itineraryData]);
           setPlanStatus("success");
+          setPlanError(null);
           setSelectedItineraryIndex(0);
           setSelectedRoute(null);
-          setViewingSavedJourney(true); // Flag that we're viewing a saved journey
-        } else if (data.item.type === "ROUTE" && data.item.routeId) {
-          // Load the saved bus route
+          setViewingSavedJourney(true);
+          // Always set destination name if available (works for both authenticated and public)
+          setSharedJourneyDestinationName(data.journey.destinationName ?? null);
+        } 
+        // Handle route type (only for authenticated users viewing their own saved routes)
+        else if (data.route?.routeId) {
           setMode("explore");
           try {
             const routesResponse = await fetch("/api/routes");
             if (routesResponse.ok) {
               const routesData = (await routesResponse.json()) as { routes: RouteSummary[] };
-              const route = routesData.routes.find((r) => r.RouteId === Number(data.item.routeId));
+              const route = routesData.routes.find((r) => r.RouteId === Number(data.route!.routeId));
               if (route) {
                 setSelectedRoute(route);
                 setPlanItineraries(null);
                 setJourneyStops([]);
+                setViewingSavedJourney(false);
+                setSharedJourneyDestinationName(null);
               }
             }
           } catch (err) {
@@ -194,54 +187,12 @@ export default function Home() {
           }
         }
       } catch (error) {
-        console.error("Error loading saved item:", error);
+        console.error("Error loading journey:", error);
       }
     };
 
-    loadItem().catch((error) => {
-      console.error("Failed to load saved item:", error);
-    });
-  }, [searchParams, session.status, session.user?.id]);
-
-  // Handle shared journey from URL parameter (public access)
-  useEffect(() => {
-    const sharedJourneyId = searchParams.get("journeyId");
-    if (!sharedJourneyId) {
-      return;
-    }
-
-    const loadSharedJourney = async () => {
-      try {
-        const response = await fetch(`/api/journeys/${encodeURIComponent(sharedJourneyId)}`);
-        if (!response.ok) {
-          console.error("Failed to fetch shared journey");
-          return;
-        }
-
-        const data = (await response.json()) as {
-          journey: { itineraryData: PlanItinerary; destinationName?: string | null };
-        };
-
-        if (!data.journey?.itineraryData) {
-          console.error("Shared journey missing itinerary data");
-          return;
-        }
-
-        setMode("plan");
-        setPlanItineraries([data.journey.itineraryData]);
-        setPlanStatus("success");
-        setPlanError(null);
-        setSelectedItineraryIndex(0);
-        setSelectedRoute(null);
-        setViewingSavedJourney(true);
-        setSharedJourneyDestinationName(data.journey.destinationName ?? null);
-      } catch (error) {
-        console.error("Error loading shared journey:", error);
-      }
-    };
-
-    void loadSharedJourney();
-  }, [searchParams]);
+    void loadJourney();
+  }, [searchParams, session.status]);
 
   useEffect(() => {
     if (!("geolocation" in navigator)) {

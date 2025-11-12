@@ -675,7 +675,7 @@ export function RoutesSidebar({
                     hasVehiclesLoaded={!!allVehicles}
                     onSelectRoute={onSelectRoute}
                     onViewOnMap={(itemId: string) => {
-                      router.push(`/?itemId=${itemId}`);
+                      router.push(`/?journeyId=${itemId}`);
                     }}
                     searchQuery={routeQuery}
                   />
@@ -749,7 +749,7 @@ export function RoutesSidebar({
                 deleteConfirm={deleteConfirm}
                 onDeleteConfirm={setDeleteConfirm}
                 onViewOnMap={(itemId: string) => {
-                  router.push(`/?itemId=${itemId}`);
+                  router.push(`/?journeyId=${itemId}`);
                 }}
                 onDelete={async (itemId: string) => {
                   await savedItems.remove(itemId);

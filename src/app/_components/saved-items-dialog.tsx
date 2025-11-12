@@ -27,7 +27,7 @@ export function SavedItemsDialog({ open, onOpenChange }: SavedItemsDialogProps) 
 
   const handleViewOnMap = (itemId: string) => {
     onOpenChange(false);
-    router.push(`/?itemId=${itemId}`);
+    router.push(`/?journeyId=${itemId}`);
   };
 
   const handleDelete = async (itemId: string) => {
