@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { db } from "@/server/db";
 import { generateFakeBuses, shouldUseFakeBuses } from "@/server/dev-bus-data";
-import { getCached, getCachedWithJitter } from "@/lib/redis";
+import { getCached, getCachedWithJitter, getCachedBatch } from "@/lib/redis";
 import { CACHE_KEYS, CACHE_TTL } from "@/lib/cache-keys";
 
 // Log dev mode status on module load
@@ -562,11 +562,22 @@ export const fetchAllVehicles = async (): Promise<RouteDetails["Vehicles"]> => {
       async () => {
         const routes = await fetchRoutes();
 
-        // Parallelize vehicle fetching for all routes to avoid N+1 query problem
+        // Optimize: Batch fetch all route details from Redis at once
+        const routeKeys = routes.map((route) => CACHE_KEYS.ROUTE_DETAILS(route.RouteId));
+        const cachedRouteDetails = await getCachedBatch<RouteDetails>(routeKeys);
+
+        // Process routes: use cached data if available, otherwise fetch individually
         const vehiclePromises = routes.map(async (route) => {
           try {
-            const routeDetails = await fetchRouteDetails(route.RouteId);
-            if (routeDetails.Vehicles && routeDetails.Vehicles.length > 0) {
+            const cacheKey = CACHE_KEYS.ROUTE_DETAILS(route.RouteId);
+            let routeDetails = cachedRouteDetails.get(cacheKey);
+
+            // If cache miss, fetch individually
+            if (!routeDetails) {
+              routeDetails = await fetchRouteDetails(route.RouteId);
+            }
+
+            if (routeDetails?.Vehicles && routeDetails.Vehicles.length > 0) {
               // Filter out invalid coordinates
               return routeDetails.Vehicles.filter(
                 (vehicle) =>
