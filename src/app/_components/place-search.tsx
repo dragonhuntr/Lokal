@@ -147,7 +147,7 @@ export function PlaceSearch({
 
       {!hasOrigin && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <p className="text-xs text-amber-900 mb-2">
+          <p className="text-xs text-amber-900">
             {userLocation ? "Using your GPS location" : "Allow location access in your browser settings to plan a journey"}
           </p>
           {!userLocation && placeResults.length > 0 && (

@@ -880,12 +880,13 @@ export function RoutesSidebar({
           }}
           transition={{
             type: "spring",
-            damping: 30,
-            stiffness: 300,
+            stiffness: 50,
+            damping: 300,
+            bounce: 0.25,
           }}
           drag="y"
           dragConstraints={{ top: 0, bottom: closedY }}
-          dragElastic={0.1}
+          dragElastic={1}
           onDragEnd={handleDragEnd}
           onClick={() => {
             // If closed and clicking on handle area, open
