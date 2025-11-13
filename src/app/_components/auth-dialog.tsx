@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { useSession } from "@/trpc/session";
 
@@ -21,6 +21,20 @@ export function AuthDialog({ open, onOpenChange, defaultMode = "signin" }: AuthD
   const [emailValid, setEmailValid] = useState<boolean | null>(null);
   const [passwordValid, setPasswordValid] = useState<boolean | null>(null);
   const session = useSession();
+
+  // Sync mode with defaultMode when dialog opens
+  useEffect(() => {
+    if (open) {
+      setMode(defaultMode);
+      // Reset form fields when dialog opens
+      setEmail("");
+      setPassword("");
+      setName("");
+      setError(null);
+      setEmailValid(null);
+      setPasswordValid(null);
+    }
+  }, [open, defaultMode]);
 
   const validateEmail = (value: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
