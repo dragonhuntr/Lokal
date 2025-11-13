@@ -45,6 +45,8 @@ export default function Home() {
   const [savedJourneyOrigin, setSavedJourneyOrigin] = useState<Coordinates | null>(null);
   const [savedJourneyDestination, setSavedJourneyDestination] = useState<Coordinates | null>(null);
   const hasAutoRequestedLocation = useRef(false);
+  const lastPlannedOriginRef = useRef<Coordinates | null>(null);
+  const lastPlannedStopsRef = useRef<LocationSearchResult[]>([]);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -381,18 +383,57 @@ export default function Home() {
     }
   }, [userLocation, requestLocation]);
 
+  // Helper function to calculate distance between two coordinates
+  const distanceBetween = useCallback((a: Coordinates, b: Coordinates): number => {
+    const EARTH_RADIUS_METERS = 6_371_000;
+    const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+    const lat1 = toRadians(a.latitude);
+    const lat2 = toRadians(b.latitude);
+    const deltaLat = toRadians(b.latitude - a.latitude);
+    const deltaLon = toRadians(b.longitude - a.longitude);
+
+    const x =
+      Math.sin(deltaLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+
+    const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+    return EARTH_RADIUS_METERS * c;
+  }, []);
+
   useEffect(() => {
     if (!journeyStops.length) {
       setPlanStatus("idle");
       setPlanItineraries(null);
       setPlanError(null);
       setSelectedItineraryIndex(0);
+      lastPlannedOriginRef.current = null;
+      lastPlannedStopsRef.current = [];
       return;
     }
 
     if (!effectiveOrigin) {
       setPlanStatus("loading");
       setPlanError(null);
+      return;
+    }
+
+    // Check if we need to re-plan:
+    // 1. If journey stops changed (always re-plan)
+    // 2. If origin changed significantly (more than 50 meters) or is new
+    const lastOrigin = lastPlannedOriginRef.current;
+    const lastStops = lastPlannedStopsRef.current;
+    const stopsChanged = 
+      journeyStops.length !== lastStops.length ||
+      journeyStops.some((stop, idx) => stop.id !== lastStops[idx]?.id);
+    
+    const originChangedSignificantly = 
+      !lastOrigin || 
+      distanceBetween(lastOrigin, effectiveOrigin) > 50;
+
+    const shouldReplan = stopsChanged || originChangedSignificantly;
+
+    if (!shouldReplan) {
+      // Neither stops nor origin changed significantly, don't re-plan
       return;
     }
 
@@ -444,6 +485,9 @@ export default function Home() {
         setPlanStatus("success");
         setPlanError(null);
         setSelectedItineraryIndex(0);
+        // Update the last planned origin and stops
+        lastPlannedOriginRef.current = effectiveOrigin;
+        lastPlannedStopsRef.current = journeyStops;
       } catch (error) {
         if (!isActive || controller.signal.aborted) return;
 
@@ -469,7 +513,8 @@ export default function Home() {
       isActive = false;
       controller.abort();
     };
-  }, [journeyStops, effectiveOrigin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [journeyStops, effectiveOrigin, distanceBetween]);
 
   // Removed automatic route selection when itinerary changes
   // Routes should only be selected via the save bookmark button or manual route selection

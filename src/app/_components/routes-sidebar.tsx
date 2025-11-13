@@ -482,7 +482,8 @@ export function RoutesSidebar({
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [placeQuery, view, ensureSessionToken, userLocation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeQuery, view, ensureSessionToken]);
 
   const fetchLocationDetails = useCallback(
     async (mapboxId: string): Promise<LocationSearchResult | null> => {
