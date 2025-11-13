@@ -50,6 +50,12 @@ const config = {
 
   // Enable React strict mode for better development experience
   reactStrictMode: true,
+
+  // Disable dev tools/indicators
+  devIndicators: {
+    buildActivity: false,
+    buildActivityPosition: 'bottom-right',
+  },
 };
 
 export default config;

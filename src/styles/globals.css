@@ -123,3 +123,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide Next.js error overlay in development */
+nextjs-portal {
+  display: none !important;
+}
+
+body {
+  padding: 0 !important;
+  overflow: auto !important;
+}

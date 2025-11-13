@@ -69,6 +69,26 @@ const ITINERARY_SOURCE_ID = "itinerary-route";
 const ITINERARY_WALK_LAYER_ID = "itinerary-walk-layer";
 const ITINERARY_BUS_LAYER_ID = "itinerary-bus-layer";
 
+// Helper function to calculate distance between two coordinates in meters
+function distanceBetweenMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+): number {
+  const EARTH_RADIUS_METERS = 6_371_000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const lat1 = toRadians(a.latitude);
+  const lat2 = toRadians(b.latitude);
+  const deltaLat = toRadians(b.latitude - a.latitude);
+  const deltaLon = toRadians(b.longitude - a.longitude);
+
+  const x =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  return EARTH_RADIUS_METERS * c;
+}
+
 /**
  * Interactive Mapbox map that renders bus routes, the user's location, and dynamic navigation
  * directions. The component integrates Mapbox's Directions API and 3D model layers for buses
@@ -91,6 +111,9 @@ export function MapboxMap({
   );
   const directionsRequestIdRef = useRef(0);
   const hasCenteredUserRef = useRef(false);
+  const lastCenteredLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastNavigationOriginRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastNavigationStopsKeyRef = useRef<string>('');
   const mapRef = useRef<MapRef | null>(null);
   const bus3DLayerRef = useRef<mapboxgl.CustomLayerInterface | null>(null);
   const journeyStopList = useMemo(
@@ -226,11 +249,32 @@ export function MapboxMap({
   useEffect(() => {
     if (selectedRoute) {
       setNavigationRoute(null);
+      lastNavigationOriginRef.current = null;
+      lastNavigationStopsKeyRef.current = '';
       return;
     }
 
     if (!userLocation || journeyStopList.length === 0) {
       setNavigationRoute(null);
+      lastNavigationOriginRef.current = null;
+      lastNavigationStopsKeyRef.current = '';
+      return;
+    }
+
+    // Check if we need to fetch new directions:
+    // 1. If journey stops changed (always fetch)
+    // 2. If origin changed significantly (more than 50 meters) or is new
+    const lastOrigin = lastNavigationOriginRef.current;
+    const originChangedSignificantly = 
+      !lastOrigin || 
+      distanceBetweenMeters(lastOrigin, userLocation) > 50;
+
+    // Check if journey stops changed
+    const lastStopsKey = journeyStopList.map(s => s.id).join(',');
+    const stopsChanged = lastNavigationStopsKeyRef.current !== lastStopsKey;
+    
+    if (!originChangedSignificantly && !stopsChanged) {
+      // Neither origin nor stops changed significantly, don't fetch
       return;
     }
 
@@ -276,6 +320,9 @@ export function MapboxMap({
               },
             ],
           });
+          // Update refs after successful fetch
+          lastNavigationOriginRef.current = userLocation;
+          lastNavigationStopsKeyRef.current = lastStopsKey;
         } else {
           setNavigationRoute(null);
         }
@@ -296,7 +343,8 @@ export function MapboxMap({
     return () => {
       controller.abort();
     };
-  }, [selectedRoute, journeyStopList, userLocation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoute, journeyStopList]);
 
   useEffect(() => {
     if (!mapLoaded) return;
@@ -382,24 +430,41 @@ export function MapboxMap({
       !selectedLocation
     ) {
       if (userLocation) {
-        // Match initial load: center on user location with zoom at least 16, preserving pitch and bearing
-        // Same logic as initial page load: Math.max(prev.zoom, 16) where prev.zoom is DEFAULT_VIEW.zoom (15)
-        mapInstance.flyTo({
-          center: [userLocation.longitude, userLocation.latitude],
-          zoom: Math.max(DEFAULT_VIEW.zoom, 16),
-          pitch: DEFAULT_VIEW.pitch,
-          bearing: DEFAULT_VIEW.bearing,
-          duration: 900,
-          essential: true,
-        });
+        const lastCentered = lastCenteredLocationRef.current;
+        // Only center on user location if:
+        // 1. We haven't centered on a location yet, OR
+        // 2. The user has moved significantly (more than 100 meters)
+        const shouldCenter =
+          !lastCentered ||
+          distanceBetweenMeters(lastCentered, userLocation) > 100;
+
+        if (shouldCenter) {
+          // Match initial load: center on user location with zoom at least 16, preserving pitch and bearing
+          // Same logic as initial page load: Math.max(prev.zoom, 16) where prev.zoom is DEFAULT_VIEW.zoom (15)
+          mapInstance.flyTo({
+            center: [userLocation.longitude, userLocation.latitude],
+            zoom: Math.max(DEFAULT_VIEW.zoom, 16),
+            pitch: DEFAULT_VIEW.pitch,
+            bearing: DEFAULT_VIEW.bearing,
+            duration: 900,
+            essential: true,
+          });
+          lastCenteredLocationRef.current = userLocation;
+        }
       } else {
-        // Reset to default view (initial page load state)
-        mapInstance.flyTo({
-          ...DEFAULT_VIEW,
-          duration: 900,
-          essential: true,
-        });
+        // Reset to default view (initial page load state) only if we haven't already centered
+        if (!lastCenteredLocationRef.current) {
+          mapInstance.flyTo({
+            ...DEFAULT_VIEW,
+            duration: 900,
+            essential: true,
+          });
+        }
       }
+    } else {
+      // Clear the last centered location when other visualizations are active
+      // so we can center again when they're cleared
+      lastCenteredLocationRef.current = null;
     }
   }, [
     mapLoaded,
@@ -409,7 +474,9 @@ export function MapboxMap({
     routeGeoJson,
     journeyStopList,
     selectedItinerary,
-    userLocation,
+    // userLocation is intentionally omitted from dependencies to prevent constant zoom resets
+    // The effect will still access the current userLocation value via closure
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   ]);
 
   const navigationLineLayer = useMemo<LayerProps>(
@@ -647,7 +714,7 @@ export function MapboxMap({
         padding: isMobile
           ? { top: 40, bottom: 40, left: 60, right: 60 }
           : { top: 80, bottom: 80, left: 120, right: 120 },
-        maxZoom: 16,
+        maxZoom: 15,
         duration: 900,
       });
     }
