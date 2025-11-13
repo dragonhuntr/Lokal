@@ -121,6 +121,37 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Prevent iOS from auto-adjusting text size */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  
+  /* Prevent zoom on input focus on mobile devices */
+  /* iOS Safari zooms in when focusing inputs with font-size < 16px */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+    touch-action: manipulation;
+    /* Prevent iOS from auto-adjusting text size */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  
+  /* On larger screens, allow smaller text sizes */
+  @media (min-width: 640px) {
+    input,
+    textarea,
+    select {
+      font-size: 0.875rem !important; /* text-sm = 14px */
+    }
+  }
+  
+  /* Prevent double-tap zoom on all interactive elements */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 

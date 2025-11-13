@@ -308,12 +308,6 @@ export default function Home() {
         const errorCode = typeof error === "object" && error !== null && "code" in error ? error.code : null;
         const errorMessage = typeof error === "object" && error !== null && "message" in error ? error.message : String(error);
         
-        // Log the full error object for debugging
-        console.error("Geolocation error object:", error);
-        console.error("Error type:", typeof error);
-        console.error("Error code:", errorCode);
-        console.error("Error message:", errorMessage);
-        
         // Handle different error types
         if (errorCode === 1 || errorMessage?.toLowerCase().includes("denied")) {
           // PERMISSION_DENIED - Safari often returns this without showing prompt if previously denied
