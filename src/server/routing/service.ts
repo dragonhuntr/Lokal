@@ -4,6 +4,7 @@ import type { Stop, Route as PrismaRoute } from "@prisma/client";
 
 import { db } from "@/server/db";
 import { fetchRoutes } from "@/server/bus-api";
+import { getNextDeparture, type DataSource } from "./realtime-helpers";
 
 export interface Coordinate {
   latitude: number;
@@ -27,6 +28,8 @@ export interface PlanRequest {
 
 export type LegType = "walk" | "bus";
 
+export type DataSource = "realtime" | "scheduled" | "estimated";
+
 export interface PlanLeg {
   type: LegType;
   distanceMeters: number;
@@ -44,6 +47,12 @@ export interface PlanLeg {
   stopCount?: number;
   /** Array of coordinates representing the path (for bus routes, includes all intermediate stops) */
   path?: Coordinate[];
+  /** Actual departure time for bus legs (when available) */
+  departureTime?: Date;
+  /** Wait time at boarding stop in minutes (for bus legs) */
+  waitTimeMinutes?: number;
+  /** Data source for timing information */
+  dataSource?: DataSource;
 }
 
 export interface PlanItinerary {
@@ -56,6 +65,8 @@ export interface PlanItinerary {
   routeColor?: string;
   startStopId?: string;
   endStopId?: string;
+  /** Data source for timing information (realtime, scheduled, or estimated) */
+  dataSource?: DataSource;
 }
 
 export interface PlanResponse {
@@ -148,13 +159,51 @@ interface Candidate {
   stopCount: number;
 }
 
-function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordinate): PlanLeg[] {
+async function buildLegs(
+  candidate: Candidate,
+  origin: Coordinate,
+  destination: Coordinate,
+  departureTime?: Date
+): Promise<PlanLeg[]> {
   const { route, startStop, endStop, startStopIndex, endStopIndex, startDistanceMeters, endDistanceMeters, busDistanceMeters, stopCount } =
     candidate;
 
   const walkingToStopMinutes = walkingTimeMinutes(startDistanceMeters);
   const walkingFromStopMinutes = walkingTimeMinutes(endDistanceMeters);
-  const busMinutes = busTimeMinutes(busDistanceMeters, stopCount);
+  const staticBusMinutes = busTimeMinutes(busDistanceMeters, stopCount);
+
+  // Calculate when user arrives at the bus stop (after walking)
+  const arrivalAtStopTime = departureTime
+    ? new Date(departureTime.getTime() + walkingToStopMinutes * 60 * 1000)
+    : undefined;
+
+  // Try to get real-time departure information
+  let nextDeparture: Awaited<ReturnType<typeof getNextDeparture>> | null = null;
+  let busMinutes = staticBusMinutes;
+  let waitTimeMinutes = 0;
+  let busDataSource: DataSource = "estimated";
+  let busDepartureTime: Date | undefined;
+
+  if (departureTime && arrivalAtStopTime && startStop.id && route.id) {
+    try {
+      nextDeparture = await getNextDeparture(startStop.id, route.id, arrivalAtStopTime);
+      if (nextDeparture) {
+        waitTimeMinutes = nextDeparture.waitTimeMinutes;
+        busDepartureTime = nextDeparture.departureTime;
+        busDataSource = nextDeparture.dataSource;
+        
+        // If we have arrival time from real-time data, use it
+        if (nextDeparture.arrivalTime && endStop.id) {
+          // Calculate travel time from departure to arrival
+          const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
+          busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch real-time departure for stop ${startStop.id}, route ${route.id}:`, error);
+      // Fall back to static calculation
+    }
+  }
 
   const walkLegStart: PlanLeg = {
     type: "walk",
@@ -163,6 +212,7 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     start: origin,
     end: { latitude: startStop.latitude, longitude: startStop.longitude },
     path: [origin, { latitude: startStop.latitude, longitude: startStop.longitude }],
+    dataSource: "estimated",
   };
 
   // Build path for bus leg including all intermediate stops with metadata
@@ -195,6 +245,9 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     endStopName: endStop.name,
     stopCount,
     path: busPath,
+    departureTime: busDepartureTime,
+    waitTimeMinutes: waitTimeMinutes > 0 ? waitTimeMinutes : undefined,
+    dataSource: busDataSource,
   };
 
   const walkLegEnd: PlanLeg = {
@@ -204,15 +257,36 @@ function buildLegs(candidate: Candidate, origin: Coordinate, destination: Coordi
     start: { latitude: endStop.latitude, longitude: endStop.longitude },
     end: destination,
     path: [{ latitude: endStop.latitude, longitude: endStop.longitude }, destination],
+    dataSource: "estimated",
   };
 
   return [walkLegStart, busLeg, walkLegEnd];
 }
 
-function buildItinerary(candidate: Candidate, origin: Coordinate, destination: Coordinate): PlanItinerary {
-  const legs = buildLegs(candidate, origin, destination);
+async function buildItinerary(
+  candidate: Candidate,
+  origin: Coordinate,
+  destination: Coordinate,
+  departureTime?: Date
+): Promise<PlanItinerary> {
+  const legs = await buildLegs(candidate, origin, destination, departureTime);
   const totalDistanceMeters = legs.reduce((sum, leg) => sum + leg.distanceMeters, 0);
-  const totalDurationMinutes = legs.reduce((sum, leg) => sum + leg.durationMinutes, 0);
+  
+  // Total duration includes wait time at bus stop
+  const totalDurationMinutes = legs.reduce((sum, leg) => {
+    return sum + leg.durationMinutes + (leg.waitTimeMinutes ?? 0);
+  }, 0);
+
+  // Determine overall data source (prefer realtime > scheduled > estimated)
+  const dataSources = legs
+    .map((leg) => leg.dataSource)
+    .filter((ds): ds is DataSource => ds !== undefined);
+  let overallDataSource: DataSource = "estimated";
+  if (dataSources.includes("realtime")) {
+    overallDataSource = "realtime";
+  } else if (dataSources.includes("scheduled")) {
+    overallDataSource = "scheduled";
+  }
 
   return {
     legs,
@@ -223,6 +297,7 @@ function buildItinerary(candidate: Candidate, origin: Coordinate, destination: C
     routeNumber: candidate.route.number,
     startStopId: candidate.startStop.id,
     endStopId: candidate.endStop.id,
+    dataSource: overallDataSource,
   };
 }
 
@@ -237,6 +312,7 @@ function buildDirectWalk(origin: Coordinate, destination: Coordinate): PlanItine
     start: origin,
     end: destination,
     path: [origin, destination],
+    dataSource: "estimated",
   };
 
   // Generate a unique route ID for walking routes based on coordinates
@@ -249,6 +325,7 @@ function buildDirectWalk(origin: Coordinate, destination: Coordinate): PlanItine
     routeId: walkRouteId,
     routeName: "Walking Route",
     routeNumber: "Walk",
+    dataSource: "estimated",
   };
 }
 
@@ -314,29 +391,35 @@ function findCandidates(
   return candidates;
 }
 
-function planSegmentItineraries(
+async function planSegmentItineraries(
   network: Network,
   origin: Coordinate,
   destination: Coordinate,
   maxWalkingDistanceMeters: number,
-  limit: number
-): PlanItinerary[] {
+  limit: number,
+  departureTime?: Date
+): Promise<PlanItinerary[]> {
   const candidates = findCandidates(network, origin, destination, maxWalkingDistanceMeters);
 
-  const itineraries: PlanItinerary[] = candidates
-    .map((candidate) => buildItinerary(candidate, origin, destination))
+  // Build all itineraries in parallel
+  const itineraryPromises = candidates.map((candidate) =>
+    buildItinerary(candidate, origin, destination, departureTime)
+  );
+  const itineraries = await Promise.all(itineraryPromises);
+  
+  const sortedItineraries = itineraries
     .sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes)
     .slice(0, limit);
 
-  if (!itineraries.length) {
-    itineraries.push(buildDirectWalk(origin, destination));
+  const directWalk = buildDirectWalk(origin, destination);
+  
+  if (!sortedItineraries.length) {
+    return [directWalk];
   } else {
-    itineraries.push(buildDirectWalk(origin, destination));
-    itineraries.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
-    itineraries.splice(limit);
+    const withWalk = [...sortedItineraries, directWalk];
+    withWalk.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
+    return withWalk.slice(0, limit);
   }
-
-  return itineraries;
 }
 
 interface CombinedItinerary {
@@ -379,17 +462,20 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
     routeColorMap.set(route.RouteId.toString(), route.Color);
   });
 
+  const departureTime = request.departureTime;
+
   if (normalizedDestinations.length === 1) {
     const finalDestination = normalizedDestinations[0];
     if (!finalDestination) {
       throw new Error("Destination is required");
     }
-    const itineraries = planSegmentItineraries(
+    const itineraries = await planSegmentItineraries(
       network,
       origin,
       finalDestination,
       maxWalkingDistanceMeters,
-      limit
+      limit,
+      departureTime
     );
 
     // Add colors to itineraries
@@ -433,13 +519,15 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
     },
   ];
 
-  normalizedDestinations.forEach((currentDestination) => {
-    const segmentItineraries = planSegmentItineraries(
+  // Process destinations sequentially to handle multi-segment journeys
+  for (const currentDestination of normalizedDestinations) {
+    const segmentItineraries = await planSegmentItineraries(
       network,
       currentOrigin,
       currentDestination,
       maxWalkingDistanceMeters,
-      limit
+      limit,
+      departureTime
     );
 
     const nextCombined: CombinedItinerary[] = [];
@@ -465,7 +553,7 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
     nextCombined.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
     combined = nextCombined.slice(0, limit);
     currentOrigin = currentDestination;
-  });
+  }
 
   const itineraries: PlanItinerary[] = combined.map((entry) => {
     const isMultiSegment = entry.segmentCount > 1;
