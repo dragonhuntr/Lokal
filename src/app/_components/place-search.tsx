@@ -9,6 +9,8 @@ import type { PlanItinerary } from "@/server/routing/service";
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { JourneyStopsList } from "./journey-stops-list";
+import { DepartureTimePicker } from "./departure-time-picker";
+import type { DataSource } from "@/server/routing/service";
 
 interface PlaceResult {
   mapboxId: string;
@@ -42,6 +44,9 @@ interface PlaceSearchProps {
   onRemoveStop?: (id: string) => void;
   onReorderStops?: (stops: LocationSearchResult[]) => void;
   onInsertStop?: (index: number, place: PlaceResult) => void;
+  departureTime?: Date | null;
+  onDepartureTimeChange?: (date: Date | null) => void;
+  dataSource?: DataSource;
 }
 
 function distanceBetweenMeters(
@@ -92,6 +97,9 @@ export function PlaceSearch({
   onRemoveStop,
   onReorderStops,
   onInsertStop,
+  departureTime,
+  onDepartureTimeChange,
+  dataSource,
 }: PlaceSearchProps) {
 
   const placesWithDistance = useMemo(() => {
@@ -169,6 +177,17 @@ export function PlaceSearch({
           >
             <X className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {hasOrigin && journeyStops.length > 0 && (
+        <div className="mb-3">
+          <DepartureTimePicker
+            value={departureTime ?? null}
+            onChange={onDepartureTimeChange ?? (() => {})}
+            dataSource={dataSource}
+            disabled={planStatus === "loading"}
+          />
         </div>
       )}
 

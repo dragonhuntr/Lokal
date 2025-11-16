@@ -27,12 +27,38 @@ export async function POST(request: Request) {
     const json = (await request.json()) as unknown;
     const parsed = requestSchema.parse(json);
 
+    // Validate departure time if provided
+    let departureTime: Date | undefined;
+    if (parsed.departureTime) {
+      departureTime = new Date(parsed.departureTime);
+      const now = new Date();
+      const maxFutureDays = 7; // Allow planning up to 7 days in advance
+      const maxFutureTime = new Date(now.getTime() + maxFutureDays * 24 * 60 * 60 * 1000);
+      
+      // Don't allow past times (allow 1 hour buffer for clock skew)
+      const minTime = new Date(now.getTime() - 60 * 60 * 1000);
+      
+      if (departureTime.getTime() < minTime.getTime()) {
+        return NextResponse.json(
+          { error: "Departure time cannot be in the past" },
+          { status: 400 }
+        );
+      }
+      
+      if (departureTime.getTime() > maxFutureTime.getTime()) {
+        return NextResponse.json(
+          { error: `Departure time cannot be more than ${maxFutureDays} days in the future` },
+          { status: 400 }
+        );
+      }
+    }
+
     const response = await planItineraries({
       origin: parsed.origin,
       destinations: parsed.destinations ?? (parsed.destination ? [parsed.destination] : undefined),
       maxWalkingDistanceMeters: parsed.maxWalkingDistanceMeters,
       limit: parsed.limit,
-      departureTime: parsed.departureTime ? new Date(parsed.departureTime) : undefined,
+      departureTime,
     });
 
     return NextResponse.json(response, { status: 200 });

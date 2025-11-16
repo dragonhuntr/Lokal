@@ -14,6 +14,7 @@ import { SavedRoutesList } from "@/app/_components/saved-routes-list";
 import { PlaceSearch } from "@/app/_components/place-search";
 import { ItineraryOptions } from "@/app/_components/itinerary-options";
 import { DirectionsSteps } from "@/app/_components/directions-steps";
+import { DepartureTimePicker } from "@/app/_components/departure-time-picker";
 import { RouteDetailView } from "@/app/_components/route-detail-view";
 import { SavedJourneysView } from "@/app/_components/saved-items-view";
 import { JourneyStopsList } from "@/app/_components/journey-stops-list";
@@ -23,7 +24,7 @@ import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
 import { useSavedItems } from "@/trpc/saved-items";
-import type { PlanItinerary } from "@/server/routing/service";
+import type { PlanItinerary, DataSource } from "@/server/routing/service";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
@@ -72,6 +73,9 @@ interface RoutesSidebarProps {
   viewingSavedJourney?: boolean;
   sharedJourneyDestinationName?: string | null;
   onExitSavedJourneyView?: () => void;
+  departureTime?: Date | null;
+  onDepartureTimeChange?: (date: Date | null) => void;
+  dataSource?: DataSource;
 }
 
 interface PlaceResult {
@@ -135,6 +139,9 @@ export function RoutesSidebar({
   viewingSavedJourney = false,
   sharedJourneyDestinationName = null,
   onExitSavedJourneyView,
+  departureTime,
+  onDepartureTimeChange,
+  dataSource,
 }: RoutesSidebarProps) {
   const router = useRouter();
   const isDesktop = useMediaQuery("(min-width: 640px)");
@@ -719,6 +726,9 @@ export function RoutesSidebar({
                     onRemoveStop={onRemoveStop}
                     onReorderStops={onReorderStops}
                     onInsertStop={onInsertStop}
+                    departureTime={departureTime}
+                    onDepartureTimeChange={onDepartureTimeChange}
+                    dataSource={dataSource}
                   />
                 ) : (
                   <>
@@ -785,16 +795,28 @@ export function RoutesSidebar({
             ) : view === "route-options" ? (
               <>
                 {journeyStops.length > 0 && (
-                  <JourneyStopsList
-                    journeyStops={journeyStops}
-                    finalStopId={finalStopId}
-                    planStatus={planStatus}
-                    planItineraries={itineraries}
-                    planError={planError}
-                    onRemoveStop={onRemoveStop}
-                    onReorderStops={onReorderStops}
-                    compact={false}
-                  />
+                  <>
+                    <JourneyStopsList
+                      journeyStops={journeyStops}
+                      finalStopId={finalStopId}
+                      planStatus={planStatus}
+                      planItineraries={itineraries}
+                      planError={planError}
+                      onRemoveStop={onRemoveStop}
+                      onReorderStops={onReorderStops}
+                      compact={false}
+                    />
+                    {hasOrigin && (
+                      <div className="mb-3 px-3">
+                        <DepartureTimePicker
+                          value={departureTime ?? null}
+                          onChange={onDepartureTimeChange ?? (() => {})}
+                          dataSource={dataSource}
+                          disabled={planStatus === "loading"}
+                        />
+                      </div>
+                    )}
+                  </>
                 )}
                 <ItineraryOptions
                   itineraries={itineraries}
@@ -807,16 +829,28 @@ export function RoutesSidebar({
             ) : view === "step-by-step" ? (
               <>
                 {journeyStops.length > 0 && (
-                  <JourneyStopsList
-                    journeyStops={journeyStops}
-                    finalStopId={finalStopId}
-                    planStatus={planStatus}
-                    planItineraries={itineraries}
-                    planError={planError}
-                    onRemoveStop={onRemoveStop}
-                    onReorderStops={onReorderStops}
-                    compact={false}
-                  />
+                  <>
+                    <JourneyStopsList
+                      journeyStops={journeyStops}
+                      finalStopId={finalStopId}
+                      planStatus={planStatus}
+                      planItineraries={itineraries}
+                      planError={planError}
+                      onRemoveStop={onRemoveStop}
+                      onReorderStops={onReorderStops}
+                      compact={false}
+                    />
+                    {hasOrigin && (
+                      <div className="mb-3 px-3">
+                        <DepartureTimePicker
+                          value={departureTime ?? null}
+                          onChange={onDepartureTimeChange ?? (() => {})}
+                          dataSource={dataSource}
+                          disabled={planStatus === "loading"}
+                        />
+                      </div>
+                    )}
+                  </>
                 )}
                 <DirectionsSteps
                   itinerary={itineraries?.[selectedItineraryIndex] ?? null}

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { MapboxMap } from "@/app/_components/map";
 import { RoutesSidebar, type LocationSearchResult } from "@/app/_components/routes-sidebar";
 import { OnboardingOverlay } from "@/app/_components/onboarding-overlay";
-import type { PlanItinerary } from "@/server/routing/service";
+import type { PlanItinerary, DataSource } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
 
@@ -54,9 +54,12 @@ export default function Home() {
   const [locationWatcherId, setLocationWatcherId] = useState<number | null>(null);
   const [savedJourneyOrigin, setSavedJourneyOrigin] = useState<Coordinates | null>(null);
   const [savedJourneyDestination, setSavedJourneyDestination] = useState<Coordinates | null>(null);
+  const [departureTime, setDepartureTime] = useState<Date | null>(null);
+  const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
   const hasAutoRequestedLocation = useRef(false);
   const lastPlannedOriginRef = useRef<Coordinates | null>(null);
   const lastPlannedStopsRef = useRef<LocationSearchResult[]>([]);
+  const lastDepartureTimeRef = useRef<Date | null>(null);
 
   // Effective origin is either user's GPS location or manually set origin
   const effectiveOrigin = useMemo(
@@ -444,7 +447,11 @@ export default function Home() {
       !lastOrigin || 
       distanceBetween(lastOrigin, effectiveOrigin) > 50;
 
-    const shouldReplan = stopsChanged || originChangedSignificantly;
+    // Also re-plan if departure time changed
+    const departureTimeChanged = 
+      departureTime?.getTime() !== lastDepartureTimeRef.current?.getTime();
+
+    const shouldReplan = stopsChanged || originChangedSignificantly || departureTimeChanged;
 
     if (!shouldReplan) {
       // Neither stops nor origin changed significantly, don't re-plan
@@ -474,6 +481,7 @@ export default function Home() {
                 longitude: stop.longitude,
               })),
               limit: 3,
+              departureTime: departureTime?.toISOString(),
             }),
             signal: controller.signal,
           });
@@ -498,12 +506,21 @@ export default function Home() {
 
           const parsedItineraries = extractPlanItineraries(rawData);
           setPlanItineraries(parsedItineraries);
+          
+          // Extract dataSource from the first itinerary if available
+          if (parsedItineraries && parsedItineraries.length > 0) {
+            setDataSource(parsedItineraries[0]?.dataSource);
+          } else {
+            setDataSource(undefined);
+          }
+          
           setPlanStatus("success");
           setPlanError(null);
           setSelectedItineraryIndex(0);
-          // Update the last planned origin and stops
+          // Update the last planned origin, stops, and departure time
           lastPlannedOriginRef.current = effectiveOrigin;
           lastPlannedStopsRef.current = journeyStops;
+          lastDepartureTimeRef.current = departureTime;
         } catch (error) {
           if (!isActive || controller.signal.aborted) return;
 
@@ -531,8 +548,7 @@ export default function Home() {
       isActive = false;
       controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [journeyStops, effectiveOrigin, distanceBetween]);
+  }, [journeyStops, effectiveOrigin, departureTime, distanceBetween]);
 
   // Removed automatic route selection when itinerary changes
   // Routes should only be selected via the save bookmark button or manual route selection
@@ -572,6 +588,9 @@ export default function Home() {
           setSavedJourneyOrigin(null);
           setSavedJourneyDestination(null);
         }}
+        departureTime={departureTime}
+        onDepartureTimeChange={setDepartureTime}
+        dataSource={dataSource}
       />
       <MapboxMap
         selectedRoute={selectedRoute}

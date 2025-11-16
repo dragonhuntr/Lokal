@@ -37,6 +37,39 @@ function formatDistance(distanceMeters: number) {
   return `${kilometres.toFixed(decimals)} km`;
 }
 
+function formatTime(date: Date | string): string {
+  const dateObj = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return "Invalid time";
+  return dateObj.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getDataSourceLabel(dataSource?: string): string {
+  switch (dataSource) {
+    case "realtime":
+      return "Real-time";
+    case "scheduled":
+      return "Scheduled";
+    case "estimated":
+    default:
+      return "Estimated";
+  }
+}
+
+function getDataSourceColor(dataSource?: string): string {
+  switch (dataSource) {
+    case "realtime":
+      return "text-green-600";
+    case "scheduled":
+      return "text-blue-600";
+    case "estimated":
+    default:
+      return "text-gray-600";
+  }
+}
+
 export function DirectionsSteps({
   itinerary,
   activeDestination,
@@ -276,6 +309,21 @@ export function DirectionsSteps({
                                 return `${stopLabel} • ${formatMinutes(leg.durationMinutes)}`;
                               })()}
                             </div>
+                            {leg.waitTimeMinutes !== undefined && leg.waitTimeMinutes > 0 && (
+                              <div className="mt-1 text-xs text-blue-600">
+                                Wait {formatMinutes(leg.waitTimeMinutes)} at stop
+                              </div>
+                            )}
+                            {leg.departureTime && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                Bus departs at {formatTime(leg.departureTime)}
+                                {leg.dataSource && (
+                                  <span className={`ml-2 ${getDataSourceColor(leg.dataSource)}`}>
+                                    ({getDataSourceLabel(leg.dataSource)})
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             {leg.startStopName && (
                               <div className="mt-2 text-sm">
                                 <span className="font-medium">From:</span>{" "}
