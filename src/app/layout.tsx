@@ -5,7 +5,6 @@ import { Geist } from "next/font/google";
 import { Toaster } from "sonner";
 
 import { TRPCReactProvider } from "@/trpc/react";
-import { ServiceWorkerRegister } from "./_components/service-worker-register";
 
 export const metadata: Metadata = {
   title: "Lokal",
@@ -45,7 +44,6 @@ export default function RootLayout({
       <body>
         <TRPCReactProvider>{children}</TRPCReactProvider>
         <Toaster position="top-right" richColors closeButton />
-        <ServiceWorkerRegister />
       </body>
     </html>
   );

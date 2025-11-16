@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
-import { motion, useMotionValue, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import type { PanInfo } from "framer-motion";
-import { ArrowLeft, Bookmark, Bus, MapPin, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Bookmark, MapPin, Menu, Search, X } from "lucide-react";
 
 import { AuthDialog } from "@/app/_components/auth-dialog";
 import { ProfileDialog } from "@/app/_components/profile-dialog";
@@ -25,7 +25,6 @@ import { useSavedItems } from "@/trpc/saved-items";
 import type { PlanItinerary } from "@/server/routing/service";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { CACHE_TTL } from "@/lib/cache-keys";
 
 const RESULT_LIMIT = 10;
 const DEBOUNCE_MS = 300;
@@ -44,7 +43,7 @@ export interface LocationSearchResult {
 
 type SidebarView = "routes" | "places" | "route-options" | "step-by-step" | "route-detail" | "saved-items";
 type PlanStatus = "idle" | "loading" | "success" | "error";
-type AppMode = "explore" | "plan" | "saved";
+type AppMode = "explore" | "saved";
 
 interface RoutesSidebarProps {
   mode: AppMode;
@@ -138,12 +137,10 @@ export function RoutesSidebar({
   const [view, setView] = useState<SidebarView>("routes");
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(600);
-  const y = useMotionValue(0);
   const [placeQuery, setPlaceQuery] = useState("");
   const [placeResults, setPlaceResults] = useState<PlaceResult[]>([]);
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
   const [placesError, setPlacesError] = useState<string | null>(null);
-  const [routeQuery, setRouteQuery] = useState("");
   const requestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
   const previousLocationIdRef = useRef<string | null>(null);
@@ -164,44 +161,54 @@ export function RoutesSidebar({
     }
   }, [isDesktop]);
 
-  // Calculate sheet height based on viewport and update on resize
+  // Calculate sheet height, update on resize
   useEffect(() => {
-    const updateSheetHeight = () => {
-      setSheetHeight(window.innerHeight * 0.85);
+    const updateHeights = () => {
+      const vh = window.innerHeight;
+      setSheetHeight(vh * 0.85);
     };
-    updateSheetHeight();
-    window.addEventListener("resize", updateSheetHeight);
-    return () => window.removeEventListener("resize", updateSheetHeight);
+    updateHeights();
+    window.addEventListener("resize", updateHeights);
+    // Also listen for visual viewport changes (important for mobile browsers/PWA)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", updateHeights);
+      return () => {
+        window.removeEventListener("resize", updateHeights);
+        window.visualViewport?.removeEventListener("resize", updateHeights);
+      };
+    }
+    return () => window.removeEventListener("resize", updateHeights);
   }, []);
 
-  // Handle height for the drag handle (64px = h-16)
-  const handleHeight = 64;
-  // When closed, sheet is positioned so only the handle shows (sheetHeight - handleHeight)
-  const closedY = useMemo(() => sheetHeight - handleHeight, [sheetHeight]);
-  
+  const collapsedHeight = 100;
+  const closedY = useMemo(() => {
+    return sheetHeight - collapsedHeight;
+  }, [sheetHeight]);
+
   const handleDragEnd = useCallback((_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-    const threshold = sheetHeight * 0.25;
-    const dragOffset = y.get();
-    
-    // y.get() gives us the drag offset from the animated position
-    // If currently open (at y=0), positive offset means dragging down
-    // If currently closed (at closedY), negative offset means dragging up
-    
+    const offset = info.offset.y;
+    const velocity = info.velocity.y;
+
+    // Threshold: need to drag at least 30% of the distance to trigger state change
+    const dragThreshold = closedY * 0.3;
+
+    // Velocity threshold for quick swipes (in pixels per second)
+    const velocityThreshold = 500;
+
     if (mobileSheetOpen) {
-      // Currently open: dragging down closes it
-      if (dragOffset > threshold || info.velocity.y > 500) {
+      // Currently open (y=0): dragging down (positive offset) closes it
+      const shouldClose = offset > dragThreshold || velocity > velocityThreshold;
+      if (shouldClose) {
         setMobileSheetOpen(false);
       }
     } else {
-      // Currently closed: dragging up opens it
-      if (dragOffset < -threshold || info.velocity.y < -500) {
+      // Currently closed (y=closedY): dragging up (negative offset) opens it
+      const shouldOpen = offset < -dragThreshold || velocity < -velocityThreshold;
+      if (shouldOpen) {
         setMobileSheetOpen(true);
       }
     }
-    
-    // Reset drag value after state update
-    y.set(0);
-  }, [sheetHeight, mobileSheetOpen, y]);
+  }, [mobileSheetOpen, closedY]);
 
   const activeDestination = journeyStops.length
     ? journeyStops[journeyStops.length - 1]
@@ -316,32 +323,35 @@ export function RoutesSidebar({
 
   useEffect(() => {
     if (mode === "explore") {
+      // In explore mode, handle both route viewing and journey planning
       if (selectedRouteId && view !== "route-detail") {
         setView("route-detail");
       } else if (!selectedRouteId && view === "route-detail") {
-        setView("routes");
-      } else if (!selectedRouteId && view !== "route-detail") {
-        setView("routes");
+        // If coming back from route detail and have journey data, show places
+        if (journeyStops.length > 0 || itineraries) {
+          setView("places");
+        } else {
+          setView("routes");
+        }
+      } else if (view === "saved-items") {
+        // Switching from saved mode to explore mode
+        if (journeyStops.length > 0 || itineraries) {
+          setView("places");
+        } else {
+          setView("routes");
+        }
       }
-    } else if (mode === "plan") {
       // When viewing a saved journey with itineraries loaded, don't switch away from journey views
       if (viewingSavedJourney && itineraries && itineraries.length > 0) {
-        // Allow the other useEffect (lines 226-235) to handle the view switch to step-by-step
         if (view === "step-by-step" || view === "route-options") {
           // Keep the current view - don't override
           return;
         }
-        // Don't force to "places" when we have itineraries for a saved journey
-        return;
-      }
-      // Otherwise, switch incompatible views to places
-      if (view === "routes" || view === "route-detail" || view === "saved-items") {
-        setView("places");
       }
     } else if (mode === "saved" && view !== "saved-items") {
       setView("saved-items");
     }
-  }, [mode, view, selectedRouteId, viewingSavedJourney, itineraries]);
+  }, [mode, view, selectedRouteId, viewingSavedJourney, itineraries, journeyStops]);
 
   useEffect(() => {
     if (session.status === "authenticated" && pendingActionRef.current) {
@@ -378,9 +388,10 @@ export function RoutesSidebar({
     sessionTokenRef.current = null;
   }, []);
 
-  // Place search
+  // Place search - now works in explore mode
   useEffect(() => {
-    if (view !== "places") return;
+    // Only run search in explore mode when user is typing
+    if (mode !== "explore") return;
 
     const trimmed = placeQuery.trim();
     if (!trimmed) {
@@ -483,7 +494,7 @@ export function RoutesSidebar({
       window.clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeQuery, view, ensureSessionToken]);
+  }, [placeQuery, mode, ensureSessionToken]);
 
   const fetchLocationDetails = useCallback(
     async (mapboxId: string): Promise<LocationSearchResult | null> => {
@@ -582,7 +593,7 @@ export function RoutesSidebar({
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Mode Toggle */}
-              <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-1" role="tablist" aria-label="Application mode">
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg bg-muted/40 p-1" role="tablist" aria-label="Application mode">
                 <button
                   type="button"
                   role="tab"
@@ -593,21 +604,8 @@ export function RoutesSidebar({
                     mode === "explore" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Bus className="h-4 w-4" />
-                  Explore
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "plan"}
-                  aria-controls="mode-panel"
-                  onClick={() => onModeChange("plan")}
-                  className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2.5 text-xs font-medium transition focus:outline-2 focus:outline-offset-2 focus:outline-ring ${
-                    mode === "plan" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
                   <MapPin className="h-4 w-4" />
-                  Plan
+                  Explore
                 </button>
                 <button
                   type="button"
@@ -674,68 +672,103 @@ export function RoutesSidebar({
                 }}
                 requireAuth={requireAuth}
               />
-            ) : mode === "explore" && view === "routes" ? (
+            ) : mode === "explore" && (view === "routes" || view === "places") ? (
               <>
+                {/* Location Search Input - Always visible in explore mode */}
                 <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
                   <Search className="h-4 w-4 opacity-60" />
                   <input
                     type="search"
-                    value={routeQuery}
-                    onChange={(event) => setRouteQuery(event.target.value)}
-                    placeholder="Search bus lines…"
+                    value={placeQuery}
+                    onChange={(event) => setPlaceQuery(event.target.value)}
+                    placeholder={session.user === null ? "Sign in to search for locations or buildings." : "Search locations or buildings…"}
                     className="h-11 w-full bg-transparent text-sm outline-none"
                     autoComplete="off"
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck="false"
+                    disabled={session.user === null}
                   />
                 </div>
-                {session.status === "authenticated" && savedItems.routes.length > 0 && (
-                  <SavedRoutesList
-                    savedRoutes={savedItems.routes}
-                    allRoutes={routes}
-                    selectedRouteId={selectedRouteId}
-                    vehiclesByRoute={vehiclesByRoute}
-                    hasVehiclesLoaded={!!allVehicles}
-                    onSelectRoute={onSelectRoute}
-                    onViewOnMap={(itemId: string) => {
-                      router.push(`/?journeyId=${itemId}`);
-                    }}
-                    searchQuery={routeQuery}
+
+                {/* Show place search results when searching */}
+                {placeQuery.trim() ? (
+                  <PlaceSearch
+                    placeQuery={placeQuery}
+                    onPlaceQueryChange={setPlaceQuery}
+                    placeResults={placeResults}
+                    isLoading={isPlacesLoading}
+                    error={placesError}
+                    userLocation={userLocation}
+                    journeyStops={journeyStops}
+                    journeyStopIds={journeyStopIds}
+                    finalStopId={finalStopId}
+                    hasOrigin={hasOrigin}
+                    manualOrigin={manualOrigin}
+                    planStatus={planStatus}
+                    onAddPlace={handleAddPlace}
+                    onPlanJourney={onPlanJourney}
+                    onSetManualOrigin={onSetManualOrigin}
+                    onRemoveStop={onRemoveStop}
                   />
+                ) : (
+                  <>
+                    {/* Show journey stops if any exist */}
+                    {journeyStops.length > 0 && (
+                      <PlaceSearch
+                        placeQuery={placeQuery}
+                        onPlaceQueryChange={setPlaceQuery}
+                        placeResults={placeResults}
+                        isLoading={isPlacesLoading}
+                        error={placesError}
+                        userLocation={userLocation}
+                        journeyStops={journeyStops}
+                        journeyStopIds={journeyStopIds}
+                        finalStopId={finalStopId}
+                        hasOrigin={hasOrigin}
+                        manualOrigin={manualOrigin}
+                        planStatus={planStatus}
+                        onAddPlace={handleAddPlace}
+                        onPlanJourney={onPlanJourney}
+                        onSetManualOrigin={onSetManualOrigin}
+                        onRemoveStop={onRemoveStop}
+                      />
+                    )}
+
+                    {/* Show routes list when not searching and no journey planned */}
+                    {journeyStops.length === 0 && (
+                      <>
+                        {session.status === "authenticated" && savedItems.routes.length > 0 && (
+                          <SavedRoutesList
+                            savedRoutes={savedItems.routes}
+                            allRoutes={routes}
+                            selectedRouteId={selectedRouteId}
+                            vehiclesByRoute={vehiclesByRoute}
+                            hasVehiclesLoaded={!!allVehicles}
+                            onSelectRoute={onSelectRoute}
+                            onViewOnMap={(itemId: string) => {
+                              router.push(`/?journeyId=${itemId}`);
+                            }}
+                            searchQuery=""
+                          />
+                        )}
+                        <RoutesList
+                          routes={routes}
+                          isLoading={areRoutesLoading}
+                          selectedRouteId={selectedRouteId}
+                          vehiclesByRoute={vehiclesByRoute}
+                          hasVehiclesLoaded={!!allVehicles}
+                          onSelectRoute={onSelectRoute}
+                          requireAuth={requireAuth}
+                          excludeRouteIds={savedRouteIds}
+                          searchQuery=""
+                          onSearchQueryChange={() => {}}
+                        />
+                      </>
+                    )}
+                  </>
                 )}
-                <RoutesList
-                  routes={routes}
-                  isLoading={areRoutesLoading}
-                  selectedRouteId={selectedRouteId}
-                  vehiclesByRoute={vehiclesByRoute}
-                  hasVehiclesLoaded={!!allVehicles}
-                  onSelectRoute={onSelectRoute}
-                  requireAuth={requireAuth}
-                  excludeRouteIds={savedRouteIds}
-                  searchQuery={routeQuery}
-                  onSearchQueryChange={setRouteQuery}
-                />
               </>
-            ) : mode === "plan" && view === "places" ? (
-              <PlaceSearch
-                placeQuery={placeQuery}
-                onPlaceQueryChange={setPlaceQuery}
-                placeResults={placeResults}
-                isLoading={isPlacesLoading}
-                error={placesError}
-                userLocation={userLocation}
-                journeyStops={journeyStops}
-                journeyStopIds={journeyStopIds}
-                finalStopId={finalStopId}
-                hasOrigin={hasOrigin}
-                manualOrigin={manualOrigin}
-                planStatus={planStatus}
-                onAddPlace={handleAddPlace}
-                onPlanJourney={onPlanJourney}
-                onSetManualOrigin={onSetManualOrigin}
-                onRemoveStop={onRemoveStop}
-              />
             ) : view === "route-options" ? (
               <ItineraryOptions
                 itineraries={itineraries}
@@ -851,7 +884,7 @@ export function RoutesSidebar({
           <Dialog.Portal>
             <Dialog.Content
               className={cn(
-                "pointer-events-auto fixed inset-auto left-4 top-4 z-50 flex max-h-[calc(100vh-2rem)] w-auto min-w-[340px] max-w-[420px] flex-col overflow-hidden rounded-xl border bg-background p-3 shadow-xl focus:outline-none md:max-w-[600px]"
+                "pointer-events-auto fixed inset-auto left-4 top-4 bottom-4 z-50 flex h-[calc(100vh-2rem)] w-auto min-w-[340px] max-w-[420px] flex-col overflow-hidden rounded-xl border bg-background p-3 shadow-xl focus:outline-none md:max-w-[600px]"
               )}
             >
               {sidebarContent}
@@ -870,9 +903,9 @@ export function RoutesSidebar({
       {/* Mobile: Use Framer Motion Bottom Sheet */}
       {!isDesktop && (
         <motion.div
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-3xl border-t border-l border-r bg-background shadow-xl"
+          className="fixed inset-x-0 bottom-0 z-50 flex w-full flex-col overflow-hidden rounded-t-3xl border-t border-l border-r bg-background shadow-xl"
           style={{
-            y: y,
+            height: `${sheetHeight}px`,
           }}
           initial={false}
           animate={{
@@ -880,20 +913,15 @@ export function RoutesSidebar({
           }}
           transition={{
             type: "spring",
-            stiffness: 50,
-            damping: 300,
-            bounce: 0.25,
+            stiffness: 400,
+            damping: 40,
+            mass: 1,
           }}
           drag="y"
           dragConstraints={{ top: 0, bottom: closedY }}
-          dragElastic={1}
+          dragElastic={{ top: 0.1, bottom: 0.1 }}
+          dragMomentum={false}
           onDragEnd={handleDragEnd}
-          onClick={() => {
-            // If closed and clicking on handle area, open
-            if (!mobileSheetOpen && y.get() >= closedY - handleHeight) {
-              setMobileSheetOpen(true);
-            }
-          }}
         >
           <div className="flex flex-col overflow-hidden p-4">
             {/* Drag Handle - Always visible */}

@@ -2,12 +2,11 @@
 
 import { useMemo } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { MapPin, Search, X } from "lucide-react";
+import { MapPin, X } from "lucide-react";
 import type { LocationSearchResult } from "./routes-sidebar";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSession } from "@/trpc/session";
 
 interface PlaceResult {
   mapboxId: string;
@@ -21,7 +20,7 @@ interface PlaceResult {
 
 interface PlaceSearchProps {
   placeQuery: string;
-  onPlaceQueryChange: (query: string) => void;
+  onPlaceQueryChange?: (query: string) => void;
   placeResults: PlaceResult[];
   
   isLoading: boolean;
@@ -69,7 +68,6 @@ function formatDistance(distanceMeters: number) {
 
 export function PlaceSearch({
   placeQuery,
-  onPlaceQueryChange,
   placeResults,
   isLoading,
   error,
@@ -85,7 +83,6 @@ export function PlaceSearch({
   onSetManualOrigin,
   onRemoveStop,
 }: PlaceSearchProps) {
-  const session = useSession();
   const placesWithDistance = useMemo(() => {
     const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
 
@@ -129,22 +126,6 @@ export function PlaceSearch({
 
   return (
     <>
-      <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
-        <Search className="h-4 w-4 opacity-60" />
-        <input
-          type="search"
-          value={placeQuery}
-          onChange={(event) => onPlaceQueryChange(event.target.value)}
-          placeholder={session.user === null ? "Sign in to search for locations or buildings." : "Search locations or buildings…"}
-          className="h-11 w-full bg-transparent text-sm outline-none"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck="false"
-		  disabled={session.user === null}
-        />
-      </div>
-
       {!hasOrigin && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
           <p className="text-xs text-amber-900">
