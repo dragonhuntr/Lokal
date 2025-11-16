@@ -12,7 +12,7 @@ import { useSession } from "@/trpc/session";
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 type Coordinates = { latitude: number; longitude: number };
 type PlanStatus = "idle" | "loading" | "success" | "error";
-type AppMode = "explore" | "plan" | "saved";
+type AppMode = "explore" | "saved";
 
 function extractPlanItineraries(value: unknown): PlanItinerary[] | null {
   if (!value || typeof value !== "object") {
@@ -57,7 +57,7 @@ export default function Home() {
   const activeDestination = journeyStops.length ? journeyStops[journeyStops.length - 1] : null;
 
   const handleAddStop = useCallback((location: LocationSearchResult) => {
-    setMode("plan"); // Switch to plan mode when adding destinations
+    // Stay in explore mode - no longer switching modes
     setSelectedRoute(null);
     setJourneyStops((previous) => {
       const withoutDuplicate = previous.filter((stop) => stop.id !== location.id);
@@ -173,7 +173,7 @@ export default function Home() {
 
         // Handle journey type
         if (data.journey?.itineraryData) {
-          setMode("plan");
+          setMode("explore");
           setPlanItineraries([data.journey.itineraryData]);
           setPlanStatus("success");
           setPlanError(null);
