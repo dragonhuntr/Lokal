@@ -9,6 +9,16 @@ import type { PlanItinerary } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
 
+type PlaceResult = {
+  mapboxId: string;
+  name: string;
+  placeName: string;
+  address?: string;
+  context: string[];
+  distanceMeters?: number;
+  location?: LocationSearchResult;
+};
+
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 type Coordinates = { latitude: number; longitude: number };
 type PlanStatus = "idle" | "loading" | "success" | "error";
@@ -63,11 +73,7 @@ export default function Home() {
       const withoutDuplicate = previous.filter((stop) => stop.id !== location.id);
       return [...withoutDuplicate, location];
     });
-    // Don't auto-plan - wait for user to click "Plan Journey" button
-    setPlanItineraries(null);
-    setPlanStatus("idle");
-    setPlanError(null);
-    setSelectedItineraryIndex(0);
+    // Auto-planning will be triggered by useEffect with debouncing
     setViewingSavedJourney(false); // Clear saved journey flag when starting new journey
     setSharedJourneyDestinationName(null); // Clear shared journey destination name
     setSavedJourneyOrigin(null); // Clear saved journey origin
@@ -86,15 +92,29 @@ export default function Home() {
         setPlanItineraries(null);
         setPlanError(null);
         setSelectedItineraryIndex(0);
-      } else {
-        setPlanItineraries(null);
-        setPlanStatus("loading");
-        setPlanError(null);
-        setSelectedItineraryIndex(0);
       }
+      // Auto-planning will be triggered by useEffect with debouncing
 
       return next;
     });
+  }, []);
+
+  const handleReorderStops = useCallback((stops: LocationSearchResult[]) => {
+    setJourneyStops(stops);
+    // Auto-planning will be triggered by useEffect with debouncing
+  }, []);
+
+  const handleInsertStop = useCallback((index: number, place: PlaceResult) => {
+    if (!place.location) return;
+    
+    setJourneyStops((previous) => {
+      const withoutDuplicate = previous.filter((stop) => stop.id !== place.location!.id);
+      const newStops = [...withoutDuplicate];
+      // Insert at the specified index (after the stop at that index)
+      newStops.splice(index + 1, 0, place.location!);
+      return newStops;
+    });
+    // Auto-planning will be triggered by useEffect with debouncing
   }, []);
 
   const handleClearJourney = useCallback(() => {
@@ -431,79 +451,83 @@ export default function Home() {
       return;
     }
 
+    // Debounce planning by 500ms to prevent excessive API calls
     const controller = new AbortController();
     let isActive = true;
 
-    const plan = async () => {
-      try {
-        if (!isActive) return;
-        setPlanStatus("loading");
-        setPlanError(null);
+    const timeoutId = setTimeout(() => {
+      const plan = async () => {
+        try {
+          if (!isActive) return;
+          setPlanStatus("loading");
+          setPlanError(null);
 
-        const response = await fetch("/api/directions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            origin: effectiveOrigin,
-            destinations: journeyStops.map((stop) => ({
-              latitude: stop.latitude,
-              longitude: stop.longitude,
-            })),
-            limit: 3,
-          }),
-          signal: controller.signal,
-        });
+          const response = await fetch("/api/directions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              origin: effectiveOrigin,
+              destinations: journeyStops.map((stop) => ({
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+              })),
+              limit: 3,
+            }),
+            signal: controller.signal,
+          });
 
-        if (!isActive || controller.signal.aborted) return;
+          if (!isActive || controller.signal.aborted) return;
 
-        if (!response.ok) {
-          const errorPayload = (await response.json().catch(() => null)) as unknown;
-          const errorMessage =
-            errorPayload &&
-            typeof errorPayload === "object" &&
-            "error" in errorPayload &&
-            typeof (errorPayload as { error?: unknown }).error === "string"
-              ? ((errorPayload as { error: string }).error)
-              : `Request failed with status ${response.status}`;
-          throw new Error(errorMessage);
+          if (!response.ok) {
+            const errorPayload = (await response.json().catch(() => null)) as unknown;
+            const errorMessage =
+              errorPayload &&
+              typeof errorPayload === "object" &&
+              "error" in errorPayload &&
+              typeof (errorPayload as { error?: unknown }).error === "string"
+                ? ((errorPayload as { error: string }).error)
+                : `Request failed with status ${response.status}`;
+            throw new Error(errorMessage);
+          }
+
+          const rawData = (await response.json()) as unknown;
+
+          if (!isActive || controller.signal.aborted) return;
+
+          const parsedItineraries = extractPlanItineraries(rawData);
+          setPlanItineraries(parsedItineraries);
+          setPlanStatus("success");
+          setPlanError(null);
+          setSelectedItineraryIndex(0);
+          // Update the last planned origin and stops
+          lastPlannedOriginRef.current = effectiveOrigin;
+          lastPlannedStopsRef.current = journeyStops;
+        } catch (error) {
+          if (!isActive || controller.signal.aborted) return;
+
+          console.error("Failed to plan itinerary", error);
+          setPlanStatus("error");
+          const errorMessage = error instanceof Error
+            ? error.message
+            : "Failed to calculate directions. Please check your internet connection and try again.";
+          setPlanError(errorMessage);
+          setPlanItineraries(null);
         }
+      };
 
-        const rawData = (await response.json()) as unknown;
-
-        if (!isActive || controller.signal.aborted) return;
-
-        const parsedItineraries = extractPlanItineraries(rawData);
-        setPlanItineraries(parsedItineraries);
-        setPlanStatus("success");
-        setPlanError(null);
-        setSelectedItineraryIndex(0);
-        // Update the last planned origin and stops
-        lastPlannedOriginRef.current = effectiveOrigin;
-        lastPlannedStopsRef.current = journeyStops;
-      } catch (error) {
-        if (!isActive || controller.signal.aborted) return;
-
-        console.error("Failed to plan itinerary", error);
-        setPlanStatus("error");
-        const errorMessage = error instanceof Error
-          ? error.message
-          : "Failed to calculate directions. Please check your internet connection and try again.";
-        setPlanError(errorMessage);
-        setPlanItineraries(null);
-      }
-    };
-
-    plan().catch((error) => {
-      console.error("Failed to plan journey:", error);
-      if (isActive && !controller.signal.aborted) {
-        setPlanStatus("error");
-        setPlanError("Failed to calculate route. Please try again.");
-      }
-    });
+      plan().catch((error) => {
+        console.error("Failed to plan journey:", error);
+        if (isActive && !controller.signal.aborted) {
+          setPlanStatus("error");
+          setPlanError("Failed to calculate route. Please try again.");
+        }
+      });
+    }, 500);
 
     return () => {
+      clearTimeout(timeoutId);
       isActive = false;
       controller.abort();
     };
@@ -529,6 +553,8 @@ export default function Home() {
         onRemoveStop={handleRemoveStop}
         onClearJourney={handleClearJourney}
         onPlanJourney={handlePlanJourney}
+        onReorderStops={handleReorderStops}
+        onInsertStop={handleInsertStop}
         userLocation={userLocation}
         manualOrigin={manualOrigin}
         onSetManualOrigin={setManualOrigin}

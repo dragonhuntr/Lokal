@@ -16,6 +16,7 @@ import { ItineraryOptions } from "@/app/_components/itinerary-options";
 import { DirectionsSteps } from "@/app/_components/directions-steps";
 import { RouteDetailView } from "@/app/_components/route-detail-view";
 import { SavedJourneysView } from "@/app/_components/saved-items-view";
+import { JourneyStopsList } from "@/app/_components/journey-stops-list";
 import { extractContextNames } from "@/app/_components/utils/mapbox-helpers";
 import { env } from "@/env";
 import { api } from "@/trpc/react";
@@ -56,7 +57,9 @@ interface RoutesSidebarProps {
   onAddStop?: (location: LocationSearchResult) => void;
   onRemoveStop?: (id: string) => void;
   onClearJourney?: () => void;
-  onPlanJourney?: () => void;
+  onPlanJourney?: () => void; // Deprecated - kept for backward compatibility
+  onReorderStops?: (stops: LocationSearchResult[]) => void;
+  onInsertStop?: (index: number, place: PlaceResult) => void;
   userLocation?: { latitude: number; longitude: number } | null;
   manualOrigin?: LocationSearchResult | null;
   onSetManualOrigin?: (location: LocationSearchResult | null) => void;
@@ -118,6 +121,8 @@ export function RoutesSidebar({
   onAddStop,
   onRemoveStop,
   onPlanJourney,
+  onReorderStops,
+  onInsertStop,
   userLocation,
   manualOrigin,
   onSetManualOrigin,
@@ -706,10 +711,14 @@ export function RoutesSidebar({
                     hasOrigin={hasOrigin}
                     manualOrigin={manualOrigin}
                     planStatus={planStatus}
+                    planItineraries={itineraries}
+                    planError={planError}
                     onAddPlace={handleAddPlace}
                     onPlanJourney={onPlanJourney}
                     onSetManualOrigin={onSetManualOrigin}
                     onRemoveStop={onRemoveStop}
+                    onReorderStops={onReorderStops}
+                    onInsertStop={onInsertStop}
                   />
                 ) : (
                   <>
@@ -728,10 +737,14 @@ export function RoutesSidebar({
                         hasOrigin={hasOrigin}
                         manualOrigin={manualOrigin}
                         planStatus={planStatus}
+                        planItineraries={itineraries}
+                        planError={planError}
                         onAddPlace={handleAddPlace}
                         onPlanJourney={onPlanJourney}
                         onSetManualOrigin={onSetManualOrigin}
                         onRemoveStop={onRemoveStop}
+                        onReorderStops={onReorderStops}
+                        onInsertStop={onInsertStop}
                       />
                     )}
 
@@ -770,34 +783,62 @@ export function RoutesSidebar({
                 )}
               </>
             ) : view === "route-options" ? (
-              <ItineraryOptions
-                itineraries={itineraries}
-                planStatus={planStatus}
-                planError={planError}
-                hasOrigin={hasOrigin}
-                onSelectItinerary={handleSelectItineraryAndView}
-              />
+              <>
+                {journeyStops.length > 0 && (
+                  <JourneyStopsList
+                    journeyStops={journeyStops}
+                    finalStopId={finalStopId}
+                    planStatus={planStatus}
+                    planItineraries={itineraries}
+                    planError={planError}
+                    onRemoveStop={onRemoveStop}
+                    onReorderStops={onReorderStops}
+                    compact={false}
+                  />
+                )}
+                <ItineraryOptions
+                  itineraries={itineraries}
+                  planStatus={planStatus}
+                  planError={planError}
+                  hasOrigin={hasOrigin}
+                  onSelectItinerary={handleSelectItineraryAndView}
+                />
+              </>
             ) : view === "step-by-step" ? (
-              <DirectionsSteps
-                itinerary={itineraries?.[selectedItineraryIndex] ?? null}
-                activeDestination={activeDestination}
-                requireAuth={requireAuth}
-                onSaveJourney={async (itinerary, nickname, destinationName) => {
-                  if (!userLocation) {
-                    throw new Error("User location required to save journey");
-                  }
-                  await savedItems.saveJourney(itinerary, userLocation.latitude, userLocation.longitude, nickname, destinationName);
-                }}
-                viewingSavedJourney={viewingSavedJourney}
-                sharedJourneyDestinationName={sharedJourneyDestinationName}
-                onBackToSavedItems={() => {
-                  if (onExitSavedJourneyView) {
-                    onExitSavedJourneyView();
-                  }
-                  onModeChange("saved");
-                  setView("saved-items");
-                }}
-              />
+              <>
+                {journeyStops.length > 0 && (
+                  <JourneyStopsList
+                    journeyStops={journeyStops}
+                    finalStopId={finalStopId}
+                    planStatus={planStatus}
+                    planItineraries={itineraries}
+                    planError={planError}
+                    onRemoveStop={onRemoveStop}
+                    onReorderStops={onReorderStops}
+                    compact={false}
+                  />
+                )}
+                <DirectionsSteps
+                  itinerary={itineraries?.[selectedItineraryIndex] ?? null}
+                  activeDestination={activeDestination}
+                  requireAuth={requireAuth}
+                  onSaveJourney={async (itinerary, nickname, destinationName) => {
+                    if (!userLocation) {
+                      throw new Error("User location required to save journey");
+                    }
+                    await savedItems.saveJourney(itinerary, userLocation.latitude, userLocation.longitude, nickname, destinationName);
+                  }}
+                  viewingSavedJourney={viewingSavedJourney}
+                  sharedJourneyDestinationName={sharedJourneyDestinationName}
+                  onBackToSavedItems={() => {
+                    if (onExitSavedJourneyView) {
+                      onExitSavedJourneyView();
+                    }
+                    onModeChange("saved");
+                    setView("saved-items");
+                  }}
+                />
+              </>
             ) : mode === "saved" && view === "saved-items" ? (
               <SavedJourneysView
                 items={savedItems}
