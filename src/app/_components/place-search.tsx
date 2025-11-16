@@ -4,9 +4,11 @@ import { useMemo } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { MapPin, X } from "lucide-react";
 import type { LocationSearchResult } from "./routes-sidebar";
+import type { PlanItinerary } from "@/server/routing/service";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { JourneyStopsList } from "./journey-stops-list";
 
 interface PlaceResult {
   mapboxId: string;
@@ -32,10 +34,14 @@ interface PlaceSearchProps {
   hasOrigin: boolean;
   manualOrigin?: LocationSearchResult | null;
   planStatus: "idle" | "loading" | "success" | "error";
+  planItineraries?: PlanItinerary[] | null;
+  planError?: string | null;
   onAddPlace: (place: PlaceResult) => void;
   onPlanJourney?: () => void;
   onSetManualOrigin?: (location: LocationSearchResult | null) => void;
   onRemoveStop?: (id: string) => void;
+  onReorderStops?: (stops: LocationSearchResult[]) => void;
+  onInsertStop?: (index: number, place: PlaceResult) => void;
 }
 
 function distanceBetweenMeters(
@@ -78,11 +84,16 @@ export function PlaceSearch({
   hasOrigin,
   manualOrigin,
   planStatus,
+  planItineraries,
+  planError,
   onAddPlace,
   onPlanJourney,
   onSetManualOrigin,
   onRemoveStop,
+  onReorderStops,
+  onInsertStop,
 }: PlaceSearchProps) {
+
   const placesWithDistance = useMemo(() => {
     const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
 
@@ -146,17 +157,6 @@ export function PlaceSearch({
         </div>
       )}
 
-      {journeyStops.length > 0 && planStatus === "idle" && (
-        <button
-          type="button"
-          onClick={() => onPlanJourney?.()}
-          className="mb-3 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-          disabled={!hasOrigin}
-        >
-          {hasOrigin ? `Plan Journey (${journeyStops.length} stop${journeyStops.length === 1 ? "" : "s"})` : "Set starting location to plan"}
-        </button>
-      )}
-
       {manualOrigin && (
         <div className="mb-3 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
           <div className="flex items-center gap-2 text-xs">
@@ -172,53 +172,15 @@ export function PlaceSearch({
         </div>
       )}
 
-      {journeyStops.length > 0 && (
-        <div className="mb-3 space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">
-            Journey Stops ({journeyStops.length})
-          </div>
-          <div className="space-y-1.5">
-            {journeyStops.map((stop, index) => {
-              const isFinal = stop.id === finalStopId;
-              return (
-                <div
-                  key={stop.id}
-                  className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
-                    isFinal
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-border bg-card"
-                  }`}
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
-                      {index + 1}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {stop.name}
-                      </div>
-                      {stop.placeName && stop.placeName !== stop.name && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {stop.placeName}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {onRemoveStop && (
-                    <button
-                      onClick={() => onRemoveStop(stop.id)}
-                      className="ml-2 flex-shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      aria-label={`Remove ${stop.name}`}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <JourneyStopsList
+        journeyStops={journeyStops}
+        finalStopId={finalStopId}
+        planStatus={planStatus}
+        planItineraries={planItineraries}
+        planError={planError}
+        onRemoveStop={onRemoveStop}
+        onReorderStops={onReorderStops}
+      />
 
       <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
         {isLoading && <Spinner size="sm" className="text-blue-600" />}
