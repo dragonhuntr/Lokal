@@ -10,20 +10,22 @@ import { DataSourceType } from "./base";
 /**
  * Converts GTFS time string to a Date object
  * Handles GTFS times > 24 hours (e.g., "25:30:00" = next day 1:30 AM)
+ * GTFS times are in the transit agency's local timezone, not UTC
  * @param gtfsTime GTFS time string (e.g., "14:30:00" or "25:30:00")
- * @param baseDate Base date to apply the time to
- * @returns Date object with the GTFS time applied
+ * @param baseDate Base date to apply the time to (should be normalized to local midnight)
+ * @returns Date object with the GTFS time applied in local timezone
  */
 function gtfsTimeToDate(gtfsTime: string, baseDate: Date): Date {
   const { hours, minutes, seconds } = parseGTFSTime(gtfsTime);
   const date = new Date(baseDate);
 
   // Handle times >= 24 hours (next day)
+  // Use local timezone methods since GTFS times are in local time
   if (hours >= 24) {
-    date.setUTCHours(hours - 24, minutes, seconds || 0, 0);
-    date.setUTCDate(date.getUTCDate() + 1);
+    date.setHours(hours - 24, minutes, seconds || 0, 0);
+    date.setDate(date.getDate() + 1);
   } else {
-    date.setUTCHours(hours, minutes, seconds || 0, 0);
+    date.setHours(hours, minutes, seconds || 0, 0);
   }
 
   return date;
@@ -40,9 +42,10 @@ export class GTFSDataSource implements DepartureDataSource {
     requestedDepartureTime: Date
   ): Promise<DepartureInfo | null> {
     try {
-      // Normalize date to midnight UTC for GTFS query
+      // Normalize date to midnight in local timezone for GTFS query
+      // GTFS times are in local timezone, so we need to use local date normalization
       const queryDate = new Date(requestedDepartureTime);
-      queryDate.setUTCHours(0, 0, 0, 0);
+      queryDate.setHours(0, 0, 0, 0);
 
       // Get scheduled departures from GTFS database
       const gtfsDepartures = await getRouteDeparturesAtStop(

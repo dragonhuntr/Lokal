@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { ArrowLeft, Bookmark, BusFront, Footprints, Share2 } from "lucide-react";
+import { ArrowLeft, Bookmark, BusFront, ChevronDown, ChevronUp, Footprints, MapPin, Share2 } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { LocationSearchResult } from "./routes-sidebar";
 import { useSavedItems } from "@/trpc/saved-items";
+import { calculateItineraryTimes } from "./utils/itinerary-times";
 
 interface DirectionsStepsProps {
   itinerary?: PlanItinerary | null;
@@ -84,6 +85,7 @@ export function DirectionsSteps({
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [justRemoved, setJustRemoved] = useState(false);
+  const [expandedStops, setExpandedStops] = useState<Set<number>>(new Set());
 
   const matchingSavedJourney = useMemo(() => {
     if (!itinerary) return null;
@@ -144,6 +146,8 @@ export function DirectionsSteps({
     ?? lastLeg?.end?.stopName
     ?? "Your destination";
 
+  const { startTime, arrivalTime, displayedDurationMinutes } = calculateItineraryTimes(itinerary);
+
   return (
     <div className="flex-1 min-h-0">
       <ScrollArea.Root className="h-full w-full overflow-hidden rounded-md border">
@@ -166,11 +170,16 @@ export function DirectionsSteps({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-2xl font-bold text-foreground">
-                    {formatMinutes(itinerary.totalDurationMinutes)}
+                    {formatMinutes(displayedDurationMinutes)}
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">
                     {formatDistance(itinerary.totalDistanceMeters)} total
                   </div>
+                  {startTime && arrivalTime && (
+                    <div className="mt-2 text-sm font-medium text-foreground">
+                      {formatTime(startTime)} → {formatTime(arrivalTime)}
+                    </div>
+                  )}
                 </div>
                 {/* Only show action buttons if not viewing a shared journey */}
                 {!isSharedJourney && (
@@ -180,7 +189,7 @@ export function DirectionsSteps({
                         type="button"
                         onClick={async () => {
                           const shareUrl = `${window.location.origin}/journey/${matchingSavedJourney.id}`;
-                          const message = `View my Journey on Lokal! ETA to ${destinationName} is ${formatShareMinutes(itinerary.totalDurationMinutes)}. ${shareUrl}`;
+                          const message = `View my Journey on Lokal! ETA to ${destinationName} is ${formatShareMinutes(displayedDurationMinutes)}. ${shareUrl}`;
 
                           try {
                             if (navigator.clipboard?.writeText) {
@@ -255,6 +264,47 @@ export function DirectionsSteps({
                 const isFirstLeg = legIndex === 0;
                 const isLastLeg = legIndex === itinerary.legs.length - 1;
 
+                // Calculate leg start and end times sequentially
+                // Each leg starts when the previous leg ends
+                let legStartTime: Date | null = null;
+                let legEndTime: Date | null = null;
+                
+                if (startTime) {
+                  // Calculate cumulative time up to this leg
+                  let currentTime = new Date(startTime);
+                  
+                  for (let i = 0; i < legIndex; i++) {
+                    const prevLeg = itinerary.legs[i];
+                    if (!prevLeg) continue;
+                    
+                    if (prevLeg.type === "bus" && prevLeg.departureTime) {
+                      // Bus leg with departure time - use actual departure time
+                      const busDeparture = new Date(prevLeg.departureTime);
+                      // Update current time to bus departure + bus duration
+                      currentTime = new Date(busDeparture.getTime() + prevLeg.durationMinutes * 60 * 1000);
+                    } else {
+                      // Walk leg or bus without departure time - add duration
+                      currentTime = new Date(currentTime.getTime() + prevLeg.durationMinutes * 60 * 1000);
+                      // Add wait time if present (for bus legs without departure time)
+                      if (prevLeg.waitTimeMinutes) {
+                        currentTime = new Date(currentTime.getTime() + prevLeg.waitTimeMinutes * 60 * 1000);
+                      }
+                    }
+                  }
+                  
+                  // Set start time for current leg
+                  if (!isWalk && leg.departureTime) {
+                    // Bus leg with departure time - use actual departure time
+                    legStartTime = new Date(leg.departureTime);
+                  } else {
+                    // Walk leg or bus without departure time - start after previous leg ends
+                    legStartTime = new Date(currentTime);
+                  }
+                  
+                  // Calculate end time
+                  legEndTime = new Date(legStartTime.getTime() + leg.durationMinutes * 60 * 1000);
+                }
+
                 return (
                   <div
                     key={legIndex}
@@ -277,13 +327,18 @@ export function DirectionsSteps({
                           <>
                             <div className="font-semibold text-foreground">
                               {isFirstLeg
-                                ? "Walk to bus stop"
+                                ? leg.endStopName
+                                  ? `Walk to ${leg.endStopName}`
+                                  : "Walk to bus stop"
                                 : isLastLeg
                                 ? "Walk to destination"
                                 : "Walk to next stop"}
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
                               {formatDistance(leg.distanceMeters)} • {formatMinutes(leg.durationMinutes)}
+                              {legStartTime && legEndTime && (
+                                <span className="ml-2">• {formatTime(legStartTime)} → {formatTime(legEndTime)}</span>
+                              )}
                             </div>
                             {leg.endStopName && !isLastLeg && (
                               <div className="mt-2 text-sm">
@@ -308,12 +363,10 @@ export function DirectionsSteps({
                                     : `${hopCount} stops`;
                                 return `${stopLabel} • ${formatMinutes(leg.durationMinutes)}`;
                               })()}
+                              {legStartTime && legEndTime && (
+                                <span className="ml-2">• {formatTime(legStartTime)} → {formatTime(legEndTime)}</span>
+                              )}
                             </div>
-                            {leg.waitTimeMinutes !== undefined && leg.waitTimeMinutes > 0 && (
-                              <div className="mt-1 text-xs text-blue-600">
-                                Wait {formatMinutes(leg.waitTimeMinutes)} at stop
-                              </div>
-                            )}
                             {leg.departureTime && (
                               <div className="mt-1 text-xs text-muted-foreground">
                                 Bus departs at {formatTime(leg.departureTime)}
@@ -336,6 +389,119 @@ export function DirectionsSteps({
                                 {leg.endStopName}
                               </div>
                             )}
+                            {leg.path && leg.path.length > 0 && (
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedStops((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(legIndex)) {
+                                        next.delete(legIndex);
+                                      } else {
+                                        next.add(legIndex);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+                                >
+                                  <span>
+                                    View all stops ({leg.path.length})
+                                  </span>
+                                  {expandedStops.has(legIndex) ? (
+                                    <ChevronUp className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronDown className="h-4 w-4" />
+                                  )}
+                                </button>
+                                {expandedStops.has(legIndex) && (
+                                  <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4">
+                                    <div className="relative">
+                                      {/* Vertical line connecting stops */}
+                                      <div 
+                                        className="absolute bottom-0 top-0 left-2 w-4 rounded-full" 
+                                        style={{ backgroundColor: leg.routeColor ? `#${leg.routeColor}` : "#2563eb" }}
+                                      />
+                                      
+                                      {/* Stops list */}
+                                      <div className="space-y-4">
+                                        {leg.path.map((stop, stopIndex) => {
+                                          const isFirst = stopIndex === 0;
+                                          const isLast = stopIndex === leg.path!.length - 1;
+                                          const routeColor = leg.routeColor ? `#${leg.routeColor}` : "#2563eb";
+                                          
+                                          return (
+                                            <div
+                                              key={stop.stopId ?? stopIndex}
+                                              className="relative pl-10"
+                                            >
+                                              {/* Stop marker circle */}
+                                              <div className="absolute left-4 top-0 flex h-8 w-8 -translate-x-1/2 items-center justify-center">
+                                                <div
+                                                  className={`relative flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all ${
+                                                    isFirst || isLast
+                                                      ? "border-blue-500 bg-blue-100"
+                                                      : "border-gray-300 bg-white"
+                                                  }`}
+                                                  style={
+                                                    isFirst || isLast
+                                                      ? undefined
+                                                      : {
+                                                          borderColor: routeColor,
+                                                          backgroundColor: "#ffffff",
+                                                        }
+                                                  }
+                                                >
+                                                  <MapPin
+                                                    className={`h-4 w-4 ${
+                                                      isFirst || isLast
+                                                        ? "text-blue-600"
+                                                        : "text-gray-500"
+                                                    }`}
+                                                    style={
+                                                      !(isFirst || isLast)
+                                                        ? {
+                                                            color: routeColor,
+                                                          }
+                                                        : undefined
+                                                    }
+                                                  />
+                                                </div>
+                                              </div>
+                                              
+                                              {/* Stop info */}
+                                              <div>
+                                                <div className={`text-sm font-medium ${
+                                                  isFirst || isLast ? "text-blue-900" : "text-gray-700"
+                                                }`}>
+                                                  {stop.stopName ?? `Stop ${stopIndex + 1}`}
+                                                </div>
+                                                {(isFirst || isLast) && (
+                                                  <div className="mt-1">
+                                                    {isFirst && (
+                                                      <span className="inline-block rounded bg-blue-200 px-2 py-0.5 text-xs font-medium text-blue-800">
+                                                        Boarding
+                                                      </span>
+                                                    )}
+                                                    {isLast && (
+                                                      <span className="inline-block rounded bg-green-200 px-2 py-0.5 text-xs font-medium text-green-800">
+                                                        Get off
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </>
                         )}
                       </div>
@@ -348,11 +514,13 @@ export function DirectionsSteps({
             {/* Arrival info */}
             <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-center">
               <div className="text-sm font-medium text-green-900">
-                You&apos;ll arrive at your destination
+                You&apos;ll arrive at {destinationName}
               </div>
-              <div className="mt-1 text-lg font-bold text-green-900">
-                {destinationName}
-              </div>
+              {arrivalTime && (
+                <div className="mt-1 text-base font-semibold text-green-800">
+                  {formatTime(arrivalTime)}
+                </div>
+              )}
             </div>
           </div>
         </ScrollArea.Viewport>

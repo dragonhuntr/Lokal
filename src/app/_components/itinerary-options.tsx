@@ -3,8 +3,8 @@
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { BusFront, Footprints } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
-
 import { Skeleton } from "@/components/ui/skeleton";
+import { calculateItineraryTimes } from "./utils/itinerary-times";
 
 interface ItineraryOptionsProps {
   itineraries?: PlanItinerary[] | null;
@@ -27,6 +27,15 @@ function formatDistance(distanceMeters: number) {
   const kilometres = distanceMeters / 1000;
   const decimals = kilometres >= 10 ? 0 : 1;
   return `${kilometres.toFixed(decimals)} km`;
+}
+
+function formatTime(date: Date | string): string {
+  const dateObj = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return "Invalid time";
+  return dateObj.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export function ItineraryOptions({
@@ -104,6 +113,7 @@ export function ItineraryOptions({
               const busLegs = itinerary.legs.filter((leg) => leg.type === "bus");
               const totalWalkDistance = walkLegs.reduce((sum, leg) => sum + leg.distanceMeters, 0);
               const stopCount = busLegs.reduce((sum, leg) => sum + (leg.stopCount ?? 1) - 1, 0);
+              const { startTime, arrivalTime, displayedDurationMinutes } = calculateItineraryTimes(itinerary);
 
               return (
                 <button
@@ -114,11 +124,16 @@ export function ItineraryOptions({
                   <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
                     <div className="min-w-0">
                       <div className="text-xl sm:text-2xl font-bold text-foreground">
-                        {formatMinutes(itinerary.totalDurationMinutes)}
+                        {formatMinutes(displayedDurationMinutes)}
                       </div>
                       <div className="mt-1 text-xs sm:text-sm text-muted-foreground">
                         {formatDistance(itinerary.totalDistanceMeters)} • {stopCount} {stopCount === 1 ? "stop" : "stops"}
                       </div>
+                      {startTime && arrivalTime && (
+                        <div className="mt-1 text-xs sm:text-sm font-medium text-foreground">
+                          {formatTime(startTime)} → {formatTime(arrivalTime)}
+                        </div>
+                      )}
                     </div>
                     {itinerary.routeNumber && (
                       <div className="text-right">

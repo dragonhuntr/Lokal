@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import type { LocationSearchResult } from "./routes-sidebar";
 import type { PlanItinerary } from "@/server/routing/service";
+import { calculateItineraryTimes } from "./utils/itinerary-times";
 
 import { Spinner } from "@/components/ui/spinner";
 
@@ -272,7 +273,7 @@ export function JourneyStopsList({
           <div className="flex items-center justify-between">
             <span className="font-medium text-green-900">Total duration:</span>
             <span className="text-green-700">
-              {formatDuration(planItineraries[0].totalDurationMinutes)}
+              {formatDuration(calculateItineraryTimes(planItineraries[0]).displayedDurationMinutes)}
             </span>
           </div>
         </div>
