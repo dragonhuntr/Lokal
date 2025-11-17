@@ -6,6 +6,7 @@ import { db } from "@/server/db";
 import { fetchRoutes } from "@/server/bus-api";
 import { departureOrchestrator } from "./data-sources/orchestrator";
 import { DataSourceType } from "./data-sources/base";
+import { haversineDistance } from "@/utils/geo";
 
 // Map new DataSourceType enum to old string type for backward compatibility
 export type DataSource = "realtime" | "scheduled" | "estimated";
@@ -16,6 +17,8 @@ export interface Coordinate {
   stopId?: string;
   stopName?: string;
   sequence?: number;
+  bufferMinutes?: number; // Time to spend at this location before continuing
+  purpose?: string; // Optional description of activity at this stop
 }
 
 export interface PlanRequest {
@@ -57,6 +60,17 @@ export interface PlanLeg {
   dataSource?: DataSource;
 }
 
+export interface PlanStop {
+  name: string;
+  latitude: number;
+  longitude: number;
+  sequence: number;
+  bufferMinutes: number;
+  purpose?: string;
+  arrivalTime?: Date;
+  departureTime?: Date;
+}
+
 export interface PlanItinerary {
   legs: PlanLeg[];
   totalDistanceMeters: number;
@@ -69,6 +83,10 @@ export interface PlanItinerary {
   endStopId?: string;
   /** Data source for timing information (realtime, scheduled, or estimated) */
   dataSource?: DataSource;
+  /** Detailed stop information with arrival/departure/buffer times for multi-stop journeys */
+  stops?: PlanStop[];
+  /** Total buffer time across all stops (in minutes) */
+  totalBufferMinutes?: number;
 }
 
 export interface PlanResponse {
@@ -83,22 +101,9 @@ const DEFAULT_MAX_WALK_METERS = 1000;
 const DEFAULT_ROUTE_COLOR = '2563eb'; // Blue
 const WALKING_COLOR = '6b7280'; // Gray
 
-const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-
+// Use shared haversine distance calculation
 function haversineDistanceMeters(a: Coordinate, b: Coordinate) {
-  const R = 6371_000; // metres
-  const lat1 = toRadians(a.latitude);
-  const lat2 = toRadians(b.latitude);
-  const deltaLat = toRadians(b.latitude - a.latitude);
-  const deltaLon = toRadians(b.longitude - a.longitude);
-
-  const sinLat = Math.sin(deltaLat / 2);
-  const sinLon = Math.sin(deltaLon / 2);
-
-  const aa = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
-  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
-
-  return R * c;
+  return haversineDistance(a, b);
 }
 
 function minutesFromSeconds(seconds: number) {
@@ -596,6 +601,162 @@ interface CombinedItinerary {
   segmentCount: number;
 }
 
+/**
+ * Extracts the actual journey start time from a planned itinerary.
+ * For "leave now" mode (no specified departure time), uses the first bus departure.
+ * For "leave at specific time" mode, uses the provided departure time.
+ */
+function getJourneyStartTime(
+  itinerary: PlanItinerary,
+  requestedDepartureTime?: Date
+): Date | null {
+  if (requestedDepartureTime) {
+    return requestedDepartureTime;
+  }
+
+  // Find first bus leg with departure time
+  const firstBusLeg = itinerary.legs.find((leg) => leg.type === "bus" && leg.departureTime);
+  if (!firstBusLeg?.departureTime) {
+    return null;
+  }
+
+  // Walk backwards from bus departure to find journey start
+  const busDepartureTime = new Date(firstBusLeg.departureTime);
+  let walkDurationBeforeBus = 0;
+
+  for (const leg of itinerary.legs) {
+    if (leg === firstBusLeg) break;
+    walkDurationBeforeBus += leg.durationMinutes;
+  }
+
+  return new Date(busDepartureTime.getTime() - walkDurationBeforeBus * 60 * 1000);
+}
+
+/**
+ * Calculates when we arrive at the destination of an itinerary.
+ */
+function getJourneyArrivalTime(
+  itinerary: PlanItinerary,
+  requestedDepartureTime?: Date
+): Date | null {
+  const startTime = getJourneyStartTime(itinerary, requestedDepartureTime);
+  if (!startTime) return null;
+
+  return new Date(startTime.getTime() + itinerary.totalDurationMinutes * 60 * 1000);
+}
+
+/**
+ * Calculate stop times for a multi-stop journey based on its combined legs.
+ * This traces through all legs and calculates arrival/departure at each destination.
+ */
+function calculateStopTimesFromLegs(
+  legs: PlanLeg[],
+  destinations: Coordinate[],
+  origin: Coordinate,
+  requestedDepartureTime?: Date
+): PlanStop[] {
+  const stops: PlanStop[] = [];
+
+  // Get journey start time
+  const firstBusLeg = legs.find((leg) => leg.type === "bus" && leg.departureTime);
+  let currentTime: Date;
+
+  if (requestedDepartureTime) {
+    currentTime = new Date(requestedDepartureTime);
+  } else if (firstBusLeg?.departureTime) {
+    // Walk backwards from first bus to find journey start
+    const busDepartureTime = new Date(firstBusLeg.departureTime);
+    let walkDurationBeforeBus = 0;
+    for (const leg of legs) {
+      if (leg === firstBusLeg) break;
+      walkDurationBeforeBus += leg.durationMinutes;
+    }
+    currentTime = new Date(busDepartureTime.getTime() - walkDurationBeforeBus * 60 * 1000);
+  } else {
+    currentTime = new Date();
+  }
+
+  // Add origin stop
+  stops.push({
+    name: origin.stopName ?? "Origin",
+    latitude: origin.latitude,
+    longitude: origin.longitude,
+    sequence: 0,
+    bufferMinutes: 0,
+    purpose: origin.purpose,
+    arrivalTime: undefined,
+    departureTime: new Date(currentTime),
+  });
+
+  // Track our progress through legs for each destination
+  let destIndex = 0;
+  let legIndex = 0;
+
+  while (destIndex < destinations.length && legIndex < legs.length) {
+    const dest = destinations[destIndex];
+    if (!dest) break;
+
+    // Find legs that end at or near this destination
+    // We'll accumulate time until we reach this destination
+    let travelTime = 0;
+    let foundDestination = false;
+
+    while (legIndex < legs.length) {
+      const leg = legs[legIndex];
+      if (!leg) break;
+
+      // Add this leg's duration
+      if (leg.type === "bus" && leg.departureTime) {
+        // For bus legs with departure time, jump to that time + duration
+        currentTime = new Date(new Date(leg.departureTime).getTime() + leg.durationMinutes * 60 * 1000);
+      } else {
+        currentTime = new Date(currentTime.getTime() + leg.durationMinutes * 60 * 1000);
+      }
+
+      legIndex++;
+
+      // Check if this leg ends at the destination
+      // Compare coordinates (with small tolerance for floating point)
+      const endsAtDest =
+        Math.abs(leg.end.latitude - dest.latitude) < 0.0001 &&
+        Math.abs(leg.end.longitude - dest.longitude) < 0.0001;
+
+      if (endsAtDest) {
+        foundDestination = true;
+        break;
+      }
+    }
+
+    if (foundDestination) {
+      const arrivalTime = new Date(currentTime);
+      const bufferMinutes = dest.bufferMinutes ?? 0;
+      const departureTime = destIndex < destinations.length - 1
+        ? new Date(arrivalTime.getTime() + bufferMinutes * 60 * 1000)
+        : undefined;
+
+      stops.push({
+        name: dest.stopName ?? `Stop ${destIndex + 1}`,
+        latitude: dest.latitude,
+        longitude: dest.longitude,
+        sequence: destIndex + 1,
+        bufferMinutes,
+        purpose: dest.purpose,
+        arrivalTime,
+        departureTime,
+      });
+
+      // Update current time to include buffer
+      if (departureTime) {
+        currentTime = departureTime;
+      }
+    }
+
+    destIndex++;
+  }
+
+  return stops;
+}
+
 export async function planItineraries(request: PlanRequest): Promise<PlanResponse> {
   const {
     origin,
@@ -675,6 +836,7 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
   }
 
   let currentOrigin = origin;
+  let currentDepartureTime = departureTime;
   let combined: CombinedItinerary[] = [
     {
       legs: [],
@@ -685,24 +847,30 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
   ];
 
   // Process destinations sequentially to handle multi-segment journeys
-  for (const currentDestination of normalizedDestinations) {
+  for (let i = 0; i < normalizedDestinations.length; i++) {
+    const currentDestination = normalizedDestinations[i];
+    if (!currentDestination) continue;
+
+    // Plan this segment from current origin to current destination
     const segmentItineraries = await planSegmentItineraries(
       network,
       currentOrigin,
       currentDestination,
       maxWalkingDistanceMeters,
       limit,
-      departureTime
+      currentDepartureTime
     );
 
     const nextCombined: CombinedItinerary[] = [];
+    const bufferMinutes = currentDestination.bufferMinutes ?? 0;
 
+    // Combine each partial journey with each segment itinerary
     for (const partial of combined) {
       for (const segment of segmentItineraries) {
         nextCombined.push({
           legs: [...partial.legs, ...segment.legs],
           totalDistanceMeters: partial.totalDistanceMeters + segment.totalDistanceMeters,
-          totalDurationMinutes: partial.totalDurationMinutes + segment.totalDurationMinutes,
+          totalDurationMinutes: partial.totalDurationMinutes + segment.totalDurationMinutes + bufferMinutes,
           firstSegment: partial.firstSegment ?? {
             routeId: segment.routeId,
             routeName: segment.routeName,
@@ -717,6 +885,17 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
 
     nextCombined.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
     combined = nextCombined.slice(0, limit);
+
+    // Calculate next segment's departure time using the best segment
+    const bestSegment = segmentItineraries[0];
+    if (bestSegment) {
+      const arrivalTime = getJourneyArrivalTime(bestSegment, currentDepartureTime);
+      if (arrivalTime) {
+        currentDepartureTime = new Date(arrivalTime.getTime() + bufferMinutes * 60 * 1000);
+      }
+    }
+
+    // Update origin for next segment
     currentOrigin = currentDestination;
   }
 
@@ -735,6 +914,10 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
       ? WALKING_COLOR
       : DEFAULT_ROUTE_COLOR;
 
+    // Calculate stop times for THIS specific itinerary based on its actual legs
+    const stops = calculateStopTimesFromLegs(entry.legs, normalizedDestinations, origin, departureTime);
+    const totalBufferMinutes = stops.reduce((sum, stop) => sum + stop.bufferMinutes, 0);
+
     return {
       legs: entry.legs,
       totalDistanceMeters: entry.totalDistanceMeters,
@@ -745,6 +928,8 @@ export async function planItineraries(request: PlanRequest): Promise<PlanRespons
       routeColor,
       startStopId: entry.firstSegment?.startStopId,
       endStopId: entry.lastSegment?.endStopId,
+      stops,
+      totalBufferMinutes,
     };
   });
 

@@ -42,6 +42,8 @@ export interface LocationSearchResult {
   longitude: number;
   address?: string;
   context: string[];
+  bufferMinutes?: number; // Time to spend at this location before continuing
+  purpose?: string; // Optional description of activity at this stop
 }
 
 type SidebarView = "routes" | "places" | "route-options" | "step-by-step" | "route-detail" | "saved-items";
@@ -58,6 +60,7 @@ interface RoutesSidebarProps {
   journeyStops?: LocationSearchResult[];
   onAddStop?: (location: LocationSearchResult) => void;
   onRemoveStop?: (id: string) => void;
+  onUpdateStop?: (id: string, updates: Partial<LocationSearchResult>) => void;
   onClearJourney?: () => void;
   onPlanJourney?: () => void; // Deprecated - kept for backward compatibility
   onReorderStops?: (stops: LocationSearchResult[]) => void;
@@ -71,6 +74,11 @@ interface RoutesSidebarProps {
   planError?: string | null;
   selectedItineraryIndex?: number;
   onSelectItinerary?: (index: number, itinerary: PlanItinerary) => void;
+  lockedItinerary?: PlanItinerary | null;
+  isItineraryLocked?: boolean;
+  onLockItinerary?: (index: number, itinerary: PlanItinerary) => void;
+  onUnlockItinerary?: () => void;
+  onAddStopToLockedItinerary?: (location: LocationSearchResult, insertIndex?: number) => void;
   viewingSavedJourney?: boolean;
   sharedJourneyDestinationName?: string | null;
   onExitSavedJourneyView?: () => void;
@@ -125,6 +133,7 @@ export function RoutesSidebar({
   journeyStops = [],
   onAddStop,
   onRemoveStop,
+  onUpdateStop,
   onPlanJourney,
   onReorderStops,
   onInsertStop,
@@ -137,6 +146,11 @@ export function RoutesSidebar({
   planError = null,
   selectedItineraryIndex = 0,
   onSelectItinerary,
+  lockedItinerary = null,
+  isItineraryLocked = false,
+  onLockItinerary,
+  onUnlockItinerary,
+  onAddStopToLockedItinerary,
   viewingSavedJourney = false,
   sharedJourneyDestinationName = null,
   onExitSavedJourneyView,
@@ -745,6 +759,14 @@ export function RoutesSidebar({
     [onSelectItinerary]
   );
 
+  const handleLockItineraryAndView = useCallback(
+    (index: number, itinerary: PlanItinerary) => {
+      onLockItinerary?.(index, itinerary);
+      setView("step-by-step");
+    },
+    [onLockItinerary]
+  );
+
   // Desktop-specific header with Dialog components (only used inside Dialog.Content)
   const desktopHeader = (
     <div className="mb-3 flex items-center justify-between">
@@ -798,40 +820,88 @@ export function RoutesSidebar({
 
               {/* View Headers */}
               {view === "route-options" ? (
-                <div className="mb-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setView("places")}
-                    className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    Back to search
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-foreground">
-                      {activeDestination?.name ?? "Suggested routes"}
+                <div className="mb-3 space-y-2">
+                  {isItineraryLocked && lockedItinerary ? (
+                    <button
+                      type="button"
+                      onClick={() => setView("places")}
+                      className="w-full rounded-md border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <MapPin className="h-4 w-4" />
+                        Add stop
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setView("places")}
+                        className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Back to search
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-foreground">
+                          {activeDestination?.name ?? "Suggested routes"}
+                        </div>
+                        {activeDestination?.placeName && (
+                          <div className="truncate text-xs text-muted-foreground">{activeDestination.placeName}</div>
+                        )}
+                      </div>
                     </div>
-                    {activeDestination?.placeName && (
-                      <div className="truncate text-xs text-muted-foreground">{activeDestination.placeName}</div>
-                    )}
-                  </div>
+                  )}
                 </div>
               ) : view === "step-by-step" ? (
-                <div className="mb-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setView("route-options")}
-                    className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    Back to routes
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-foreground">Step-by-step</div>
-                    {activeDestination?.name && (
-                      <div className="truncate text-xs text-muted-foreground">To {activeDestination.name}</div>
-                    )}
-                  </div>
+                <div className="mb-3 space-y-2">
+                  {isItineraryLocked ? (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setView("places")}
+                          className="inline-flex items-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-blue-700"
+                        >
+                          <MapPin className="h-4 w-4" />
+                          Add stop
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-foreground">Your Route</div>
+                          {activeDestination?.name && (
+                            <div className="truncate text-xs text-muted-foreground">To {activeDestination.name}</div>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUnlockItinerary?.();
+                          setView("route-options");
+                        }}
+                        className="text-xs text-blue-600 underline transition hover:text-blue-700"
+                      >
+                        Change route
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setView("route-options")}
+                        className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-background px-2 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:border-border hover:bg-muted"
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        Back
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-foreground">Step-by-step</div>
+                        {activeDestination?.name && (
+                          <div className="truncate text-xs text-muted-foreground">To {activeDestination.name}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : null}
 
@@ -1047,6 +1117,7 @@ export function RoutesSidebar({
                       planError={planError}
                       onRemoveStop={onRemoveStop}
                       onReorderStops={onReorderStops}
+                      onUpdateStop={onUpdateStop}
                       compact={false}
                     />
                     {hasOrigin && (
@@ -1066,7 +1137,12 @@ export function RoutesSidebar({
                   planStatus={planStatus}
                   planError={planError}
                   hasOrigin={hasOrigin}
+                  selectedItineraryIndex={selectedItineraryIndex}
                   onSelectItinerary={handleSelectItineraryAndView}
+                  lockedItinerary={lockedItinerary}
+                  isItineraryLocked={isItineraryLocked}
+                  onLockItinerary={handleLockItineraryAndView}
+                  onUnlockItinerary={onUnlockItinerary}
                 />
               </>
             ) : view === "step-by-step" ? (
@@ -1081,6 +1157,7 @@ export function RoutesSidebar({
                       planError={planError}
                       onRemoveStop={onRemoveStop}
                       onReorderStops={onReorderStops}
+                      onUpdateStop={onUpdateStop}
                       compact={false}
                     />
                     {hasOrigin && (

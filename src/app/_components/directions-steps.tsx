@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { ArrowLeft, Bookmark, BusFront, ChevronDown, ChevronUp, Footprints, MapPin, Share2 } from "lucide-react";
+import { ArrowLeft, Bookmark, BusFront, ChevronDown, ChevronUp, Clock, Footprints, MapPin, Share2 } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
 import type { LocationSearchResult } from "./routes-sidebar";
 import { useSavedItems } from "@/trpc/saved-items";
 import { calculateItineraryTimes } from "./utils/itinerary-times";
+import { formatMinutes, formatShareMinutes, formatDistance, formatTime } from "@/utils/format";
 
 interface DirectionsStepsProps {
   itinerary?: PlanItinerary | null;
@@ -16,35 +17,6 @@ interface DirectionsStepsProps {
   viewingSavedJourney?: boolean;
   sharedJourneyDestinationName?: string | null;
   onBackToSavedItems?: () => void;
-}
-
-function formatMinutes(value: number) {
-  const rounded = Math.round(value);
-  if (rounded <= 0) return "<1 min";
-  return `${rounded} min${rounded === 1 ? "" : "s"}`;
-}
-
-function formatShareMinutes(value: number) {
-  const rounded = Math.max(1, Math.round(value));
-  return `${rounded} minute${rounded === 1 ? "" : "s"}`;
-}
-
-function formatDistance(distanceMeters: number) {
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)} m`;
-  }
-  const kilometres = distanceMeters / 1000;
-  const decimals = kilometres >= 10 ? 0 : 1;
-  return `${kilometres.toFixed(decimals)} km`;
-}
-
-function formatTime(date: Date | string): string {
-  const dateObj = typeof date === "string" ? new Date(date) : date;
-  if (isNaN(dateObj.getTime())) return "Invalid time";
-  return dateObj.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 function getDataSourceLabel(dataSource?: string): string {
@@ -264,6 +236,22 @@ export function DirectionsSteps({
                 const isFirstLeg = legIndex === 0;
                 const isLastLeg = legIndex === itinerary.legs.length - 1;
 
+                // Find if this leg ends at a stop with buffer time
+                // For multi-stop journeys, stops array has origin at index 0, then destinations
+                // We need to match the leg end with a stop that has buffer
+                const legEndStop = itinerary.stops?.find((stop, stopIndex) => {
+                  // Skip origin (sequence 0) and final destination
+                  if (stop.sequence === 0 || stopIndex === itinerary.stops!.length - 1) return false;
+
+                  // Check if this stop's location matches the leg's end location
+                  const endsAtStop =
+                    leg.end &&
+                    Math.abs(leg.end.latitude - stop.latitude) < 0.0001 &&
+                    Math.abs(leg.end.longitude - stop.longitude) < 0.0001;
+
+                  return endsAtStop && stop.bufferMinutes > 0;
+                });
+
                 // Calculate leg start and end times sequentially
                 // Each leg starts when the previous leg ends
                 let legStartTime: Date | null = null;
@@ -272,11 +260,11 @@ export function DirectionsSteps({
                 if (startTime) {
                   // Calculate cumulative time up to this leg
                   let currentTime = new Date(startTime);
-                  
+
                   for (let i = 0; i < legIndex; i++) {
                     const prevLeg = itinerary.legs[i];
                     if (!prevLeg) continue;
-                    
+
                     if (prevLeg.type === "bus" && prevLeg.departureTime) {
                       // Bus leg with departure time - use actual departure time
                       const busDeparture = new Date(prevLeg.departureTime);
@@ -289,6 +277,24 @@ export function DirectionsSteps({
                       if (prevLeg.waitTimeMinutes) {
                         currentTime = new Date(currentTime.getTime() + prevLeg.waitTimeMinutes * 60 * 1000);
                       }
+                    }
+
+                    // Check if this leg ends at a stop with buffer time and add it to cumulative time
+                    const prevLegEndStop = itinerary.stops?.find((stop, stopIndex) => {
+                      // Skip origin (sequence 0) and final destination
+                      if (stop.sequence === 0 || stopIndex === itinerary.stops!.length - 1) return false;
+
+                      // Check if this stop's location matches the leg's end location
+                      const endsAtStop =
+                        prevLeg.end &&
+                        Math.abs(prevLeg.end.latitude - stop.latitude) < 0.0001 &&
+                        Math.abs(prevLeg.end.longitude - stop.longitude) < 0.0001;
+
+                      return endsAtStop && stop.bufferMinutes > 0;
+                    });
+
+                    if (prevLegEndStop && prevLegEndStop.bufferMinutes > 0) {
+                      currentTime = new Date(currentTime.getTime() + prevLegEndStop.bufferMinutes * 60 * 1000);
                     }
                   }
                   
@@ -306,16 +312,17 @@ export function DirectionsSteps({
                 }
 
                 return (
-                  <div
-                    key={legIndex}
-                    className="rounded-xl border bg-white p-4"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`mt-1 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
-                          isWalk ? "bg-blue-100" : "bg-orange-100"
-                        }`}
-                      >
+                  <>
+                    <div
+                      key={legIndex}
+                      className="rounded-xl border bg-white p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`mt-1 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+                            isWalk ? "bg-blue-100" : "bg-orange-100"
+                          }`}
+                        >
                         {isWalk ? (
                           <Footprints className="h-5 w-5 text-blue-600" />
                         ) : (
@@ -504,9 +511,40 @@ export function DirectionsSteps({
                             )}
                           </>
                         )}
+                        </div>
                       </div>
                     </div>
-                  </div>
+
+                    {/* Buffer time card - shown if this leg ends at a stop with buffer */}
+                    {legEndStop && legEndStop.bufferMinutes > 0 && (
+                      <div
+                        key={`buffer-${legIndex}`}
+                        className="rounded-xl border border-amber-200 bg-amber-50 p-4"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+                            <Clock className="h-5 w-5 text-amber-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-foreground">
+                              {formatMinutes(legEndStop.bufferMinutes)} buffer
+                            </div>
+                            <div className="mt-1 text-sm text-muted-foreground">
+                              {legEndStop.purpose
+                                ? legEndStop.purpose
+                                : `Time to spend at ${legEndStop.name}`
+                              }
+                            </div>
+                            {legEndStop.arrivalTime && legEndStop.departureTime && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {formatTime(legEndStop.arrivalTime)} → {formatTime(legEndStop.departureTime)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 );
               })}
             </div>

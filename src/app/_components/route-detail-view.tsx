@@ -6,6 +6,7 @@ import { Bus, MapPin, Bookmark } from "lucide-react";
 import type { RouterOutputs } from "@/trpc/react";
 import { api } from "@/trpc/react";
 import { useSavedItems } from "@/trpc/saved-items";
+import { haversineDistance } from "@/utils/geo";
 
 type RouteDetails = RouterOutputs["bus"]["getRouteDetails"];
 
@@ -93,7 +94,7 @@ export function RouteDetailView({
         );
 
         const distanceMeters = vehicle
-          ? haversineDistance(
+          ? haversineDistanceLocal(
               { lat: vehicle.Latitude, lng: vehicle.Longitude },
               { lat: stop.Latitude, lng: stop.Longitude }
             )
@@ -287,29 +288,15 @@ export function RouteDetailView({
 }
 
 // Helper function to calculate distance between two coordinates
-function haversineDistance(
+// Wrapper to convert lat/lng to latitude/longitude for the shared utility
+function haversineDistanceLocal(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number }
 ): number {
-  const R = 6371000; // Earth radius in meters
-  const dLat = toRadians(b.lat - a.lat);
-  const dLon = toRadians(b.lng - a.lng);
-  const lat1 = toRadians(a.lat);
-  const lat2 = toRadians(b.lat);
-
-  const haversineA =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) *
-      Math.cos(lat2) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(haversineA), Math.sqrt(1 - haversineA));
-
-  return R * c;
-}
-
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
+  return haversineDistance(
+    { latitude: a.lat, longitude: a.lng },
+    { latitude: b.lat, longitude: b.lng }
+  );
 }
 
 function formatETA(etaLocalTime: string): string {

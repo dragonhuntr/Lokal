@@ -1,41 +1,23 @@
 "use client";
 
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { BusFront, Footprints } from "lucide-react";
+import { BusFront, Footprints, Clock } from "lucide-react";
 import type { PlanItinerary } from "@/server/routing/service";
 import { Skeleton } from "@/components/ui/skeleton";
-import { calculateItineraryTimes } from "./utils/itinerary-times";
+import { calculateItineraryTimes, calculateMultiStopJourneyTimes } from "./utils/itinerary-times";
+import { formatMinutes, formatDistance, formatTime } from "@/utils/format";
 
 interface ItineraryOptionsProps {
   itineraries?: PlanItinerary[] | null;
   planStatus: "idle" | "loading" | "success" | "error";
   planError: string | null;
   hasOrigin: boolean;
+  selectedItineraryIndex?: number;
   onSelectItinerary?: (index: number, itinerary: PlanItinerary) => void;
-}
-
-function formatMinutes(value: number) {
-  const rounded = Math.round(value);
-  if (rounded <= 0) return "<1 min";
-  return `${rounded} min${rounded === 1 ? "" : "s"}`;
-}
-
-function formatDistance(distanceMeters: number) {
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)} m`;
-  }
-  const kilometres = distanceMeters / 1000;
-  const decimals = kilometres >= 10 ? 0 : 1;
-  return `${kilometres.toFixed(decimals)} km`;
-}
-
-function formatTime(date: Date | string): string {
-  const dateObj = typeof date === "string" ? new Date(date) : date;
-  if (isNaN(dateObj.getTime())) return "Invalid time";
-  return dateObj.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  lockedItinerary?: PlanItinerary | null;
+  isItineraryLocked?: boolean;
+  onLockItinerary?: (index: number, itinerary: PlanItinerary) => void;
+  onUnlockItinerary?: () => void;
 }
 
 export function ItineraryOptions({
@@ -43,7 +25,12 @@ export function ItineraryOptions({
   planStatus,
   planError,
   hasOrigin,
+  selectedItineraryIndex = 0,
   onSelectItinerary,
+  lockedItinerary,
+  isItineraryLocked = false,
+  onLockItinerary,
+  onUnlockItinerary,
 }: ItineraryOptionsProps) {
   const statusMessage = (() => {
     switch (planStatus) {
@@ -113,61 +100,126 @@ export function ItineraryOptions({
               const busLegs = itinerary.legs.filter((leg) => leg.type === "bus");
               const totalWalkDistance = walkLegs.reduce((sum, leg) => sum + leg.distanceMeters, 0);
               const stopCount = busLegs.reduce((sum, leg) => sum + (leg.stopCount ?? 1) - 1, 0);
-              const { startTime, arrivalTime, displayedDurationMinutes } = calculateItineraryTimes(itinerary);
+
+              // Use multi-stop calculation if stops are present, otherwise use basic calculation
+              const hasStops = itinerary.stops && itinerary.stops.length > 0;
+              const multiStopTimes = hasStops ? calculateMultiStopJourneyTimes(itinerary) : null;
+              const basicTimes = calculateItineraryTimes(itinerary);
+
+              const startTime = multiStopTimes?.startTime ?? basicTimes.startTime;
+              const arrivalTime = multiStopTimes?.finalArrivalTime ?? basicTimes.arrivalTime;
+              const displayedDurationMinutes = multiStopTimes?.totalTravelMinutes ?? basicTimes.displayedDurationMinutes;
+              const bufferMinutes = multiStopTimes?.totalBufferMinutes ?? 0;
+
+              const isThisLocked = isItineraryLocked && lockedItinerary === itinerary;
+              const isSelected = selectedItineraryIndex === index;
 
               return (
-                <button
+                <div
                   key={`${itinerary.routeId ?? "walk"}-${index}`}
-                  onClick={() => onSelectItinerary?.(index, itinerary)}
-                  className="w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-all duration-200 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5"
+                  className={`w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-all duration-200 ${
+                    isThisLocked
+                      ? "border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20"
+                      : "hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5"
+                  }`}
                 >
-                  <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
-                    <div className="min-w-0">
-                      <div className="text-xl sm:text-2xl font-bold text-foreground">
-                        {formatMinutes(displayedDurationMinutes)}
+                  <button
+                    onClick={() => !isThisLocked && onSelectItinerary?.(index, itinerary)}
+                    className="w-full text-left"
+                    disabled={isThisLocked}
+                  >
+                    {isThisLocked && (
+                      <div className="mb-2 flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Selected Route
                       </div>
-                      <div className="mt-1 text-xs sm:text-sm text-muted-foreground">
-                        {formatDistance(itinerary.totalDistanceMeters)} • {stopCount} {stopCount === 1 ? "stop" : "stops"}
+                    )}
+                    <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+                      <div className="min-w-0">
+                        <div className="text-xl sm:text-2xl font-bold text-foreground">
+                          {formatMinutes(displayedDurationMinutes)}
+                        </div>
+                        <div className="mt-1 text-xs sm:text-sm text-muted-foreground">
+                          {formatDistance(itinerary.totalDistanceMeters)} • {stopCount} {stopCount === 1 ? "stop" : "stops"}
+                        </div>
+                        {startTime && arrivalTime && (
+                          <div className="mt-1 text-xs sm:text-sm font-medium text-foreground">
+                            {formatTime(startTime)} → {formatTime(arrivalTime)}
+                          </div>
+                        )}
                       </div>
-                      {startTime && arrivalTime && (
-                        <div className="mt-1 text-xs sm:text-sm font-medium text-foreground">
-                          {formatTime(startTime)} → {formatTime(arrivalTime)}
+                      {itinerary.routeNumber && (
+                        <div className="text-right">
+                          <span
+                            className="block text-3xl sm:text-4xl md:text-5xl font-extrabold leading-none tracking-tighter tabular-nums"
+                            style={{ color: itinerary.routeColor ? `#${itinerary.routeColor}` : "#2563eb" }}
+                          >
+                            {itinerary.routeNumber.includes("Route ")
+                              ? itinerary.routeNumber.split("Route ")[1] ?? itinerary.routeNumber
+                              : itinerary.routeNumber}
+                          </span>
                         </div>
                       )}
                     </div>
-                    {itinerary.routeNumber && (
-                      <div className="text-right">
-                        <span
-                          className="block text-3xl sm:text-4xl md:text-5xl font-extrabold leading-none tracking-tighter tabular-nums"
-                          style={{ color: itinerary.routeColor ? `#${itinerary.routeColor}` : "#2563eb" }}
-                        >
-                          {itinerary.routeNumber.includes("Route ")
-                            ? itinerary.routeNumber.split("Route ")[1] ?? itinerary.routeNumber
-                            : itinerary.routeNumber}
-                        </span>
-                      </div>
-                    )}
-                  </div>
 
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    {busLegs.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <BusFront className="h-4 w-4" />
-                        <span>{busLegs.length} {busLegs.length === 1 ? "ride" : "rides"}</span>
-                      </div>
-                    )}
-                    {walkLegs.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <Footprints className="h-4 w-4" />
-                        <span>{formatDistance(totalWalkDistance)} walk</span>
-                      </div>
-                    )}
-                  </div>
+                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                      {busLegs.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <BusFront className="h-4 w-4" />
+                          <span>{busLegs.length} {busLegs.length === 1 ? "ride" : "rides"}</span>
+                        </div>
+                      )}
+                      {walkLegs.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <Footprints className="h-4 w-4" />
+                          <span>{formatDistance(totalWalkDistance)} walk</span>
+                        </div>
+                      )}
+                      {bufferMinutes > 0 && (
+                        <div className="flex items-center gap-1.5 text-amber-700">
+                          <Clock className="h-4 w-4" />
+                          <span>{formatMinutes(bufferMinutes)} buffer</span>
+                        </div>
+                      )}
+                    </div>
 
-                  <div className="mt-3 text-xs text-blue-600 font-medium">
-                    View step-by-step directions →
-                  </div>
-                </button>
+                    {!isThisLocked && (
+                      <div className="mt-3 text-xs text-blue-600 font-medium">
+                        View step-by-step directions →
+                      </div>
+                    )}
+                  </button>
+
+                  {isSelected && !isThisLocked && onLockItinerary && (
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onLockItinerary(index, itinerary);
+                        }}
+                        className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                      >
+                        Select this route
+                      </button>
+                    </div>
+                  )}
+
+                  {isThisLocked && onUnlockItinerary && (
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUnlockItinerary();
+                        }}
+                        className="flex-1 rounded-lg border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
+                      >
+                        Change route
+                      </button>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

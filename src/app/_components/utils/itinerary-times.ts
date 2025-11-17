@@ -1,9 +1,18 @@
-import type { PlanItinerary } from "@/server/routing/service";
+import type { PlanItinerary, PlanStop } from "@/server/routing/service";
 
 export interface ItineraryTimes {
   startTime: Date | null;
   arrivalTime: Date | null;
   displayedDurationMinutes: number;
+}
+
+export interface MultiStopJourneyTimes {
+  startTime: Date | null;
+  finalArrivalTime: Date | null;
+  totalTravelMinutes: number; // Travel time excluding buffers
+  totalBufferMinutes: number;
+  totalDurationMinutes: number; // Travel + buffer time
+  stops: PlanStop[];
 }
 
 /**
@@ -69,6 +78,39 @@ export function calculateItineraryTimes(itinerary: PlanItinerary): ItineraryTime
     startTime,
     arrivalTime,
     displayedDurationMinutes,
+  };
+}
+
+/**
+ * Calculates detailed timing information for multi-stop journeys with buffer times.
+ * Returns arrival/departure times for each stop and total duration breakdown.
+ */
+export function calculateMultiStopJourneyTimes(itinerary: PlanItinerary): MultiStopJourneyTimes {
+  // If the itinerary already has stops with times calculated by the backend, use those
+  if (itinerary.stops && itinerary.stops.length > 0) {
+    const totalBufferMinutes = itinerary.totalBufferMinutes ?? 0;
+    const totalTravelMinutes = itinerary.totalDurationMinutes - totalBufferMinutes;
+
+    return {
+      startTime: itinerary.stops[0]?.departureTime ?? null,
+      finalArrivalTime: itinerary.stops[itinerary.stops.length - 1]?.arrivalTime ?? null,
+      totalTravelMinutes,
+      totalBufferMinutes,
+      totalDurationMinutes: itinerary.totalDurationMinutes,
+      stops: itinerary.stops,
+    };
+  }
+
+  // Fallback: calculate times from legs if stops aren't populated
+  const basicTimes = calculateItineraryTimes(itinerary);
+
+  return {
+    startTime: basicTimes.startTime,
+    finalArrivalTime: basicTimes.arrivalTime,
+    totalTravelMinutes: itinerary.totalDurationMinutes,
+    totalBufferMinutes: 0,
+    totalDurationMinutes: itinerary.totalDurationMinutes,
+    stops: [],
   };
 }
 
