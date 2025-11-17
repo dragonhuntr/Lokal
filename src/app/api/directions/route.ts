@@ -6,6 +6,9 @@ import { planItineraries } from "@/server/routing/service";
 const coordinateSchema = z.object({
   latitude: z.number().refine((value) => Math.abs(value) <= 90, "Latitude must be between -90 and 90"),
   longitude: z.number().refine((value) => Math.abs(value) <= 180, "Longitude must be between -180 and 180"),
+  stopName: z.string().optional(),
+  bufferMinutes: z.number().int().min(0).max(1440).optional(), // Max 24 hours buffer
+  purpose: z.string().max(200).optional(),
 });
 
 const requestSchema = z

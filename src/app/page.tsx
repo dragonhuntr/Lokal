@@ -8,6 +8,8 @@ import { OnboardingOverlay } from "@/app/_components/onboarding-overlay";
 import type { PlanItinerary, DataSource } from "@/server/routing/service";
 import type { RouterOutputs } from "@/trpc/react";
 import { useSession } from "@/trpc/session";
+import { calculateItineraryTimes } from "@/app/_components/utils/itinerary-times";
+import { haversineDistance } from "@/utils/geo";
 
 type PlaceResult = {
   mapboxId: string;
@@ -49,6 +51,8 @@ export default function Home() {
   const [planStatus, setPlanStatus] = useState<PlanStatus>("idle");
   const [planError, setPlanError] = useState<string | null>(null);
   const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
+  const [lockedItinerary, setLockedItinerary] = useState<PlanItinerary | null>(null);
+  const [isItineraryLocked, setIsItineraryLocked] = useState(false);
   const [viewingSavedJourney, setViewingSavedJourney] = useState(false);
   const [sharedJourneyDestinationName, setSharedJourneyDestinationName] = useState<string | null>(null);
   const [locationWatcherId, setLocationWatcherId] = useState<number | null>(null);
@@ -107,6 +111,15 @@ export default function Home() {
     // Auto-planning will be triggered by useEffect with debouncing
   }, []);
 
+  const handleUpdateStop = useCallback((id: string, updates: Partial<LocationSearchResult>) => {
+    setJourneyStops((previous) =>
+      previous.map((stop) =>
+        stop.id === id ? { ...stop, ...updates } : stop
+      )
+    );
+    // Auto-planning will be triggered by useEffect with debouncing
+  }, []);
+
   const handleInsertStop = useCallback((index: number, place: PlaceResult) => {
     if (!place.location) return;
     
@@ -157,6 +170,54 @@ export default function Home() {
     },
     []
   );
+
+  const handleLockItinerary = useCallback((index: number, itinerary: PlanItinerary) => {
+    setSelectedItineraryIndex(index);
+    setLockedItinerary(itinerary);
+    setIsItineraryLocked(true);
+    setSelectedRoute(null);
+
+    // Extract and preserve the departure time from the locked itinerary
+    // We'll use this when adding stops to maintain the same start time
+    let startTime = itinerary.stops?.[0]?.departureTime;
+
+    // If stops array doesn't have departure time (shouldn't happen, but fallback)
+    if (!startTime) {
+      const times = calculateItineraryTimes(itinerary);
+      startTime = times.startTime ?? undefined;
+    }
+
+    // Update departure time to preserve for future stop additions
+    if (startTime) {
+      setDepartureTime(new Date(startTime));
+    }
+  }, []);
+
+  const handleUnlockItinerary = useCallback(() => {
+    setLockedItinerary(null);
+    setIsItineraryLocked(false);
+  }, []);
+
+  const handleAddStopToLockedItinerary = useCallback((location: LocationSearchResult, insertIndex?: number) => {
+    setJourneyStops((previous) => {
+      // Remove duplicate if exists
+      const withoutDuplicate = previous.filter((stop) => stop.id !== location.id);
+
+      // Insert at specified position or at end
+      if (insertIndex !== undefined && insertIndex >= 0 && insertIndex <= withoutDuplicate.length) {
+        const newStops = [...withoutDuplicate];
+        newStops.splice(insertIndex, 0, location);
+        return newStops;
+      }
+
+      return [...withoutDuplicate, location];
+    });
+
+    // Auto-planning will trigger and we'll try to preserve the locked route
+    // Unlock the itinerary since we're replanning - user can relock if they want
+    setIsItineraryLocked(false);
+    setLockedItinerary(null);
+  }, []);
 
   // Handle journeyId from URL parameter (works for both authenticated and public access)
   useEffect(() => {
@@ -402,19 +463,7 @@ export default function Home() {
 
   // Helper function to calculate distance between two coordinates
   const distanceBetween = useCallback((a: Coordinates, b: Coordinates): number => {
-    const EARTH_RADIUS_METERS = 6_371_000;
-    const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-    const lat1 = toRadians(a.latitude);
-    const lat2 = toRadians(b.latitude);
-    const deltaLat = toRadians(b.latitude - a.latitude);
-    const deltaLon = toRadians(b.longitude - a.longitude);
-
-    const x =
-      Math.sin(deltaLat / 2) ** 2 +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-
-    const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-    return EARTH_RADIUS_METERS * c;
+    return haversineDistance(a, b);
   }, []);
 
   useEffect(() => {
@@ -439,9 +488,16 @@ export default function Home() {
     // 2. If origin changed significantly (more than 50 meters) or is new
     const lastOrigin = lastPlannedOriginRef.current;
     const lastStops = lastPlannedStopsRef.current;
-    const stopsChanged = 
+    const stopsChanged =
       journeyStops.length !== lastStops.length ||
-      journeyStops.some((stop, idx) => stop.id !== lastStops[idx]?.id);
+      journeyStops.some((stop, idx) => {
+        const lastStop = lastStops[idx];
+        return (
+          stop.id !== lastStop?.id ||
+          stop.bufferMinutes !== lastStop?.bufferMinutes ||
+          stop.purpose !== lastStop?.purpose
+        );
+      });
     
     const originChangedSignificantly = 
       !lastOrigin || 
@@ -452,6 +508,26 @@ export default function Home() {
       departureTime?.getTime() !== lastDepartureTimeRef.current?.getTime();
 
     const shouldReplan = stopsChanged || originChangedSignificantly || departureTimeChanged;
+
+    // If stops changed, unlock the itinerary since the locked itinerary is for the old set of stops
+    if (stopsChanged && isItineraryLocked) {
+      setIsItineraryLocked(false);
+      setLockedItinerary(null);
+    }
+
+    // Skip planning if we have a locked itinerary and nothing changed
+    // This prevents replanning when the user locks a route, but allows replanning when stops change
+    if (!shouldReplan && isItineraryLocked && lockedItinerary && planItineraries) {
+      // Check if we already have the locked itinerary in our current results
+      const hasLockedItinerary = planItineraries.some(
+        (itin) => JSON.stringify(itin.legs) === JSON.stringify(lockedItinerary.legs)
+      );
+
+      if (hasLockedItinerary) {
+        // We already have this exact route planned and nothing changed, no need to replan
+        return;
+      }
+    }
 
     if (!shouldReplan) {
       // Neither stops nor origin changed significantly, don't re-plan
@@ -479,6 +555,9 @@ export default function Home() {
               destinations: journeyStops.map((stop) => ({
                 latitude: stop.latitude,
                 longitude: stop.longitude,
+                stopName: stop.name,
+                bufferMinutes: stop.bufferMinutes,
+                purpose: stop.purpose,
               })),
               limit: 3,
               departureTime: departureTime?.toISOString(),
@@ -519,7 +598,8 @@ export default function Home() {
           setSelectedItineraryIndex(0);
           // Update the last planned origin, stops, and departure time
           lastPlannedOriginRef.current = effectiveOrigin;
-          lastPlannedStopsRef.current = journeyStops;
+          // Create a deep copy of journeyStops to ensure comparison works correctly
+          lastPlannedStopsRef.current = journeyStops.map(stop => ({ ...stop }));
           lastDepartureTimeRef.current = departureTime;
         } catch (error) {
           if (!isActive || controller.signal.aborted) return;
@@ -548,7 +628,7 @@ export default function Home() {
       isActive = false;
       controller.abort();
     };
-  }, [journeyStops, effectiveOrigin, departureTime, distanceBetween]);
+  }, [journeyStops, effectiveOrigin, departureTime, distanceBetween, isItineraryLocked, lockedItinerary]);
 
   // Removed automatic route selection when itinerary changes
   // Routes should only be selected via the save bookmark button or manual route selection
@@ -567,6 +647,7 @@ export default function Home() {
         journeyStops={journeyStops}
         onAddStop={handleAddStop}
         onRemoveStop={handleRemoveStop}
+        onUpdateStop={handleUpdateStop}
         onClearJourney={handleClearJourney}
         onPlanJourney={handlePlanJourney}
         onReorderStops={handleReorderStops}
@@ -580,6 +661,11 @@ export default function Home() {
         hasOrigin={Boolean(effectiveOrigin)}
         selectedItineraryIndex={selectedItineraryIndex}
         onSelectItinerary={handleSelectItinerary}
+        lockedItinerary={lockedItinerary}
+        isItineraryLocked={isItineraryLocked}
+        onLockItinerary={handleLockItinerary}
+        onUnlockItinerary={handleUnlockItinerary}
+        onAddStopToLockedItinerary={handleAddStopToLockedItinerary}
         viewingSavedJourney={viewingSavedJourney}
         sharedJourneyDestinationName={sharedJourneyDestinationName}
         onExitSavedJourneyView={() => {
@@ -600,6 +686,7 @@ export default function Home() {
         selectedItinerary={planItineraries?.[selectedItineraryIndex] ?? null}
         savedJourneyOrigin={viewingSavedJourney ? savedJourneyOrigin : null}
         savedJourneyDestination={viewingSavedJourney ? savedJourneyDestination : null}
+        isItineraryLocked={isItineraryLocked}
       />
       </main>
     </>

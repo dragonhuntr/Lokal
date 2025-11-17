@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { MapPin, Bus, Calendar, Navigation, Share2, Trash2 } from "lucide-react";
 import type { useSavedItems } from "@/trpc/saved-items";
+import { formatShareMinutes } from "@/utils/format";
 
 interface SavedJourneysViewProps {
   items: ReturnType<typeof useSavedItems>;
@@ -74,7 +75,7 @@ export function SavedJourneysView({
                   <button
                     onClick={async () => {
                       const destination = item.destinationName ?? getJourneyDestinationName(item.itineraryData?.legs ?? []);
-                      const etaMinutes = formatDurationMinutes(item.totalDuration ?? 0);
+                      const etaMinutes = formatShareMinutes(item.totalDuration ?? 0);
                       const shareUrl = `${window.location.origin}/journey/${item.id}`;
                       const message = `View my Journey on Lokal! ETA to ${destination} is ${etaMinutes}. ${shareUrl}`;
 
@@ -175,9 +176,4 @@ function getJourneyDestinationName(legs: Array<{ endStopName?: string | null; en
 
   const lastLeg = legs[legs.length - 1];
   return lastLeg?.endStopName ?? lastLeg?.end?.stopName ?? "my destination";
-}
-
-function formatDurationMinutes(duration: number) {
-  const rounded = Math.max(1, Math.round(duration));
-  return `${rounded} minute${rounded === 1 ? "" : "s"}`;
 }

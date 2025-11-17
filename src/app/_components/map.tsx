@@ -11,6 +11,7 @@ import type { LocationSearchResult } from "./routes-sidebar";
 import { BusInfoPopup } from "./bus-info-popup";
 import type { RouteDetails } from "@/server/bus-api";
 import type { PlanItinerary } from "@/server/routing/service";
+import { haversineDistance } from "@/utils/geo";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 
@@ -22,6 +23,7 @@ interface MapboxMapProps {
   selectedItinerary?: PlanItinerary | null;
   savedJourneyOrigin?: { latitude: number; longitude: number } | null;
   savedJourneyDestination?: { latitude: number; longitude: number } | null;
+  isItineraryLocked?: boolean;
 }
 
 interface NavigationRouteGeoJSON {
@@ -74,19 +76,7 @@ function distanceBetweenMeters(
   a: { latitude: number; longitude: number },
   b: { latitude: number; longitude: number }
 ): number {
-  const EARTH_RADIUS_METERS = 6_371_000;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const lat1 = toRadians(a.latitude);
-  const lat2 = toRadians(b.latitude);
-  const deltaLat = toRadians(b.latitude - a.latitude);
-  const deltaLon = toRadians(b.longitude - a.longitude);
-
-  const x =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-
-  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  return EARTH_RADIUS_METERS * c;
+  return haversineDistance(a, b);
 }
 
 /**
@@ -102,6 +92,7 @@ export function MapboxMap({
   selectedItinerary,
   savedJourneyOrigin,
   savedJourneyDestination,
+  isItineraryLocked = false,
 }: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -845,8 +836,8 @@ export function MapboxMap({
           </Source>
         )}
 
-        {/* Render bus stops for the selected itinerary */}
-        {!selectedRoute && selectedItinerary?.legs?.map((leg, legIndex) => {
+        {/* Render bus stops for the selected itinerary - only when locked */}
+        {!selectedRoute && isItineraryLocked && selectedItinerary?.legs?.map((leg, legIndex) => {
           if (leg.type !== "bus" || !leg.path?.length) return null;
 
           return leg.path.map((stop, stopIndex) => {

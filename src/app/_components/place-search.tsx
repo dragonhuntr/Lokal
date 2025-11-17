@@ -5,6 +5,8 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { MapPin } from "lucide-react";
 import type { LocationSearchResult } from "./routes-sidebar";
 import type { PlanItinerary } from "@/server/routing/service";
+import { haversineDistance } from "@/utils/geo";
+import { formatDistance } from "@/utils/format";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -53,28 +55,7 @@ function distanceBetweenMeters(
   origin: { latitude: number; longitude: number },
   target: { latitude: number; longitude: number }
 ) {
-  const EARTH_RADIUS_METERS = 6_371_000;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const lat1 = toRadians(origin.latitude);
-  const lat2 = toRadians(target.latitude);
-  const deltaLat = toRadians(target.latitude - origin.latitude);
-  const deltaLon = toRadians(target.longitude - origin.longitude);
-
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return EARTH_RADIUS_METERS * c;
-}
-
-function formatDistance(distanceMeters: number) {
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)} m`;
-  }
-  const kilometres = distanceMeters / 1000;
-  const decimals = kilometres >= 10 ? 0 : 1;
-  return `${kilometres.toFixed(decimals)} km`;
+  return haversineDistance(origin, target);
 }
 
 export function PlaceSearch({

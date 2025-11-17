@@ -73,14 +73,44 @@ model SavedItem {
   destinationName String?
   totalDistance   Int?
   totalDuration   Int?
+  departureTime   DateTime? // When the journey should start
 
   lastViewed DateTime?
   createdAt  DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  journeyStops JourneyStop[]
 
   @@index([userId])
   @@index([userId, type])
+}
+
+model JourneyStop {
+  id            String    @id @default(cuid())
+  savedItemId   String
+  sequence      Int // Order of stops in the journey (0 = origin, 1 = first destination, etc.)
+
+  // Location details
+  name          String
+  latitude      Float
+  longitude     Float
+
+  // Buffer time at this location (in minutes)
+  bufferMinutes Int       @default(0)
+
+  // Optional purpose/activity description
+  purpose       String?
+
+  // Calculated times (set when journey is planned)
+  arrivalTime   DateTime?
+  departureTime DateTime?
+
+  createdAt     DateTime  @default(now())
+
+  savedItem SavedItem @relation(fields: [savedItemId], references: [id], onDelete: Cascade)
+
+  @@index([savedItemId, sequence])
+  @@index([savedItemId])
 }
 
 enum ItemType {
