@@ -1,0 +1,2 @@
+agency_id,agency_name,agency_url,agency_timezone,agency_lang,agency_phone,agency_fare_url,agency_email
+0,EMTA,http://www.ride-the-e.com/,America/New_York,en,814-452-2801,https://ride-the-e.com/fares-2/,support@availtec.com

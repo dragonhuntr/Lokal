@@ -27,6 +27,7 @@ import { useSavedItems } from "@/trpc/saved-items";
 import type { PlanItinerary, DataSource } from "@/server/routing/service";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { Spinner } from "@/components/ui/spinner";
 
 const RESULT_LIMIT = 10;
 const DEBOUNCE_MS = 300;
@@ -154,7 +155,12 @@ export function RoutesSidebar({
   const [placeResults, setPlaceResults] = useState<PlaceResult[]>([]);
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
   const [placesError, setPlacesError] = useState<string | null>(null);
+  const [originQuery, setOriginQuery] = useState("");
+  const [originResults, setOriginResults] = useState<PlaceResult[]>([]);
+  const [isOriginLoading, setIsOriginLoading] = useState(false);
+  const [originError, setOriginError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const originRequestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
   const previousLocationIdRef = useRef<string | null>(null);
   const session = useSession();
@@ -514,6 +520,119 @@ export function RoutesSidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeQuery, mode, ensureSessionToken]);
 
+  // Origin search - for when user doesn't have location access
+  useEffect(() => {
+    // Only run search in explore mode when user is typing and doesn't have origin
+    if (mode !== "explore" || hasOrigin) return;
+
+    const trimmed = originQuery.trim();
+    if (!trimmed) {
+      setOriginResults([]);
+      setOriginError(null);
+      setIsOriginLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    originRequestIdRef.current += 1;
+    const requestId = originRequestIdRef.current;
+
+    const timeoutId = window.setTimeout(() => {
+      setIsOriginLoading(true);
+
+      const runSearch = async () => {
+        try {
+          const sessionToken = ensureSessionToken();
+          const params = new URLSearchParams({
+            q: trimmed,
+            types: "poi,address",
+            limit: String(RESULT_LIMIT),
+            session_token: sessionToken,
+            access_token: env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
+          });
+
+          const response = await fetch(
+            `https://api.mapbox.com/search/searchbox/v1/suggest?${params.toString()}`,
+            { signal: controller.signal }
+          );
+          if (!response.ok) {
+            throw new Error(`Mapbox Search Box error: ${response.status} ${response.statusText}`);
+          }
+
+          const data = (await response.json()) as SearchBoxSuggestResponse;
+
+          if (requestId !== originRequestIdRef.current) return;
+
+          const mapped =
+            data.suggestions?.map<PlaceResult>((suggestion) => {
+              const { mapbox_id: mapboxId } = suggestion;
+              const rawCoordinates = suggestion.coordinates;
+              const hasValidCoordinates =
+                rawCoordinates &&
+                typeof rawCoordinates.latitude === "number" &&
+                typeof rawCoordinates.longitude === "number";
+              const coordinates = hasValidCoordinates
+                ? { latitude: rawCoordinates.latitude, longitude: rawCoordinates.longitude }
+                : null;
+              const contextNames = extractContextNames(suggestion.context);
+
+              const location: LocationSearchResult | null = coordinates
+                ? {
+                    id: mapboxId,
+                    name: suggestion.name ?? trimmed,
+                    placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
+                    latitude: coordinates.latitude,
+                    longitude: coordinates.longitude,
+                    address: suggestion.full_address ?? suggestion.address,
+                    context: contextNames,
+                  }
+                : null;
+
+              return {
+                mapboxId,
+                name: suggestion.name ?? trimmed,
+                placeName: suggestion.place_formatted ?? suggestion.full_address ?? suggestion.name ?? trimmed,
+                address: suggestion.full_address ?? suggestion.address,
+                context: contextNames,
+                distanceMeters: suggestion.distance ?? undefined,
+                location: location ?? undefined,
+              };
+            }) ?? [];
+
+          setOriginResults(mapped);
+          setOriginError(null);
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          console.error("Failed to search origin locations via Mapbox", err);
+          if (requestId === originRequestIdRef.current) {
+            setOriginResults([]);
+            setOriginError("We couldn't fetch locations. Please try again.");
+          }
+        } finally {
+          if (requestId === originRequestIdRef.current) {
+            setIsOriginLoading(false);
+          }
+        }
+      };
+
+      void runSearch();
+    }, DEBOUNCE_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [originQuery, mode, hasOrigin, ensureSessionToken]);
+
+  // Clear origin search when location access is granted or origin is set
+  useEffect(() => {
+    if (hasOrigin || userLocation) {
+      setOriginQuery("");
+      setOriginResults([]);
+    }
+  }, [hasOrigin, userLocation]);
+
   const fetchLocationDetails = useCallback(
     async (mapboxId: string): Promise<LocationSearchResult | null> => {
       try {
@@ -581,6 +700,35 @@ export function RoutesSidebar({
       void performSelection();
     },
     [fetchLocationDetails, onAddStop, resetSessionToken]
+  );
+
+  const handleSelectOrigin = useCallback(
+    (place: PlaceResult) => {
+      if (!onSetManualOrigin) return;
+
+      const performSelection = async () => {
+        if (place.location) {
+          onSetManualOrigin(place.location);
+          setOriginQuery("");
+          setOriginResults([]);
+          resetSessionToken();
+          return;
+        }
+
+        const location = await fetchLocationDetails(place.mapboxId);
+        if (location) {
+          onSetManualOrigin(location);
+          setOriginResults((prev) =>
+            prev.map((item) => (item.mapboxId === place.mapboxId ? { ...item, location } : item))
+          );
+          setOriginQuery("");
+        }
+        resetSessionToken();
+      };
+
+      void performSelection();
+    },
+    [fetchLocationDetails, onSetManualOrigin, resetSessionToken]
   );
 
   const handleSelectItineraryAndView = useCallback(
@@ -694,6 +842,74 @@ export function RoutesSidebar({
               />
             ) : mode === "explore" && (view === "routes" || view === "places") ? (
               <>
+                {/* Starting Location Search Input - Show when no location access */}
+                {!hasOrigin && !userLocation && (
+                  <>
+                    <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2">
+                      <MapPin className="h-4 w-4 text-amber-600" />
+                      <input
+                        type="search"
+                        value={originQuery}
+                        onChange={(event) => setOriginQuery(event.target.value)}
+                        placeholder={session.user === null ? "Sign in to search for starting location." : "Search for your starting location…"}
+                        className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-amber-700/60"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck="false"
+                        disabled={session.user === null}
+                      />
+                      {isOriginLoading && <Spinner size="sm" className="text-amber-600" />}
+                    </div>
+                    {originQuery.trim() && (
+                      <div className="mb-3 max-h-64 overflow-y-auto rounded-md border bg-card">
+                        {originResults.length > 0 ? (
+                          <ul className="space-y-1 p-2">
+                            {originResults.map((place) => {
+                              const summaryContext = place.context.join(" • ");
+                              const subtitle =
+                                place.address ??
+                                (summaryContext.length > 0 ? summaryContext : place.placeName);
+
+                              return (
+                                <li key={place.mapboxId}>
+                                  <button
+                                    className="w-full rounded-md border bg-card px-3 py-3 text-left shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
+                                    onClick={() => handleSelectOrigin(place)}
+                                    title={place.placeName}
+                                  >
+                                    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-1">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-xs text-muted-foreground">
+                                          {subtitle}
+                                        </div>
+                                        <div className="mt-1 truncate text-base font-semibold tracking-tight text-foreground">
+                                          {place.name}
+                                        </div>
+                                        <div className="mt-1 truncate text-xs text-muted-foreground">
+                                          {place.placeName}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : originError ? (
+                          <div className="p-4 text-center text-sm text-muted-foreground">
+                            {originError}
+                          </div>
+                        ) : (
+                          <div className="p-4 text-center text-sm text-muted-foreground">
+                            No places found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
                 {/* Location Search Input - Always visible in explore mode */}
                 <div className="mb-3 flex items-center gap-2 rounded-md border bg-card px-2">
                   <Search className="h-4 w-4 opacity-60" />

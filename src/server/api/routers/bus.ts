@@ -8,6 +8,11 @@ import {
   fetchRouteKML,
   fetchAllVehicles,
 } from "@/server/bus-api";
+import {
+  getScheduledDepartures,
+  getRouteDeparturesAtStop,
+  getTripSchedule,
+} from "@/server/gtfs-schedule";
 
 export const busRouter = createTRPCRouter({
   // Get all visible routes
@@ -66,11 +71,52 @@ export const busRouter = createTRPCRouter({
           return null;
         })
       );
-      
+
       // Wait for all prefetches to complete to ensure cache is populated
       // This ensures routes are cached before the mutation returns
       await Promise.allSettled(prefetchPromises);
-      
+
       return { success: true, count: input.routeIds.length };
+    }),
+
+  // Get scheduled departures from GTFS data for a specific stop
+  getScheduledDepartures: publicProcedure
+    .input(z.object({
+      stopNumericId: z.number(),
+      date: z.date().optional(),
+      afterTime: z.string().optional(), // HH:MM format
+      limit: z.number().optional().default(20),
+    }))
+    .query(async ({ input }) => {
+      return await getScheduledDepartures(
+        input.stopNumericId,
+        input.date,
+        input.afterTime,
+        input.limit
+      );
+    }),
+
+  // Get scheduled departures for a specific route at a specific stop
+  getRouteDeparturesAtStop: publicProcedure
+    .input(z.object({
+      routeNumericId: z.number(),
+      stopNumericId: z.number(),
+      date: z.date().optional(),
+      limit: z.number().optional().default(20),
+    }))
+    .query(async ({ input }) => {
+      return await getRouteDeparturesAtStop(
+        input.routeNumericId,
+        input.stopNumericId,
+        input.date,
+        input.limit
+      );
+    }),
+
+  // Get full schedule for a specific trip
+  getTripSchedule: publicProcedure
+    .input(z.object({ tripId: z.string() }))
+    .query(async ({ input }) => {
+      return await getTripSchedule(input.tripId);
     }),
 });
