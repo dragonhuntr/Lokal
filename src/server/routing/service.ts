@@ -271,9 +271,16 @@ async function buildLegs(
     busDataSource = nextDeparture.dataSource as DataSource;
 
     // If we have arrival time, use it to calculate actual travel time
+    // But only if it's valid (positive and reasonable) - otherwise fall back to static estimate
     if (nextDeparture.arrivalTime) {
       const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
-      busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
+      const calculatedMinutes = travelTimeMs / (60 * 1000);
+      // Only use calculated time if it's positive and at least 1 minute (to avoid invalid data)
+      // For bus legs spanning multiple stops, we expect at least some travel time
+      if (calculatedMinutes >= 1) {
+        busMinutes = calculatedMinutes;
+      }
+      // Otherwise, keep staticBusMinutes (already set above)
     }
   } catch (error) {
     console.warn(`Failed to fetch departure for stop ${startStop.id}, route ${route.id}:`, error);
@@ -549,18 +556,18 @@ async function planSegmentItineraries(
   const itineraries = allItineraries.filter(
     (itinerary): itinerary is PlanItinerary => {
       if (!itinerary) return false;
-      
+
       // Check if any bus leg has no departure time
       const hasBusLegWithoutDeparture = itinerary.legs.some(
         (leg) => leg.type === "bus" && !leg.departureTime
       );
-      
-      // If we have a departureTime specified, we require bus legs to have departure times
-      // If no departureTime is specified, we allow estimated itineraries
-      if (departureTime && hasBusLegWithoutDeparture) {
+
+      // ALWAYS require bus legs to have departure times
+      // If a bus leg doesn't have a departure time, it means no buses are running
+      if (hasBusLegWithoutDeparture) {
         return false;
       }
-      
+
       return true;
     }
   );

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { MapPin, X } from "lucide-react";
+import { MapPin } from "lucide-react";
 import type { LocationSearchResult } from "./routes-sidebar";
 import type { PlanItinerary } from "@/server/routing/service";
 
@@ -102,6 +102,12 @@ export function PlaceSearch({
   dataSource,
 }: PlaceSearchProps) {
 
+  // Effective origin is either user's GPS location or manually set origin
+  const effectiveOrigin = useMemo(
+    () => userLocation ?? (manualOrigin ? { latitude: manualOrigin.latitude, longitude: manualOrigin.longitude } : null),
+    [userLocation, manualOrigin]
+  );
+
   const placesWithDistance = useMemo(() => {
     const MAX_RADIUS_METERS = 150 * 1609.34; // 150 miles in meters
 
@@ -111,11 +117,11 @@ export function PlaceSearch({
           return result;
         }
 
-        if (!userLocation || !result.location) {
+        if (!effectiveOrigin || !result.location) {
           return result;
         }
 
-        const distanceMeters = distanceBetweenMeters(userLocation, {
+        const distanceMeters = distanceBetweenMeters(effectiveOrigin, {
           latitude: result.location.latitude,
           longitude: result.location.longitude,
         });
@@ -123,8 +129,8 @@ export function PlaceSearch({
         return { ...result, distanceMeters };
       })
       .filter((result) => {
-        // If no user location, include all results
-        if (!userLocation) return true;
+        // If no effective origin, include all results
+        if (!effectiveOrigin) return true;
         
         // If no distance calculated, exclude (can't verify radius)
         if (result.distanceMeters === undefined) return false;
@@ -133,7 +139,7 @@ export function PlaceSearch({
         return result.distanceMeters <= MAX_RADIUS_METERS;
       });
       // Server-side sorting via proximity parameter - no client-side sort needed
-  }, [placeResults, userLocation]);
+  }, [placeResults, effectiveOrigin]);
 
   const statusMessage = useMemo(() => {
     if (!placeQuery.trim()) return;
@@ -145,41 +151,6 @@ export function PlaceSearch({
 
   return (
     <>
-      {!hasOrigin && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <p className="text-xs text-amber-900">
-            {userLocation ? "Using your GPS location" : "Allow location access in your browser settings to plan a journey"}
-          </p>
-          {!userLocation && placeResults.length > 0 && (
-            <button
-              onClick={() => {
-                if (placeResults[0]?.location) {
-                  onSetManualOrigin?.(placeResults[0].location);
-                }
-              }}
-              className="text-xs text-amber-700 underline hover:text-amber-900"
-            >
-              Or search for your starting location above
-            </button>
-          )}
-        </div>
-      )}
-
-      {manualOrigin && (
-        <div className="mb-3 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs">
-            <MapPin className="h-3 w-3 text-blue-600" />
-            <span className="text-blue-900">Starting from: {manualOrigin.name}</span>
-          </div>
-          <button
-            onClick={() => onSetManualOrigin?.(null)}
-            className="text-blue-600 hover:text-blue-800"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
       {hasOrigin && journeyStops.length > 0 && (
         <div className="mb-3">
           <DepartureTimePicker
@@ -232,8 +203,8 @@ export function PlaceSearch({
                   place.address ??
                   (summaryContext.length > 0 ? summaryContext : place.placeName);
                 const fallbackDistance =
-                  userLocation && identifiedLocation
-                    ? distanceBetweenMeters(userLocation, {
+                  effectiveOrigin && identifiedLocation
+                    ? distanceBetweenMeters(effectiveOrigin, {
                         latitude: identifiedLocation.latitude,
                         longitude: identifiedLocation.longitude,
                       })

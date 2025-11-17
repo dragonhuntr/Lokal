@@ -37,11 +37,53 @@ export async function getScheduledDepartures(
     return [];
   }
 
-  // Get all stop times for this stop - ignore service dates, just use weekly patterns
-  const stopTimes = await db.stopTime.findMany({
+  // Normalize date for comparison - use same method as parseGTFSDate to ensure consistency
+  // parseGTFSDate creates dates in local timezone: new Date(year, month - 1, day)
+  // This ensures dates match how they were stored in the database
+  const queryDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  // Check if any service dates exist for this date (to know if GTFS data covers this date)
+  const anyServiceDatesForDate = await db.serviceDate.findFirst({
     where: {
-      stopId: stop.id,
+      date: queryDate,
     },
+  });
+
+  // Get all service dates for this date that are active
+  // exceptionType: 1 = service added (runs), 2 = service removed (doesn't run)
+  const serviceDates = await db.serviceDate.findMany({
+    where: {
+      date: queryDate,
+      exceptionType: 1, // Only get services that are active on this date
+    },
+  });
+
+  // Extract service IDs that are active on this date
+  const activeServiceIds = serviceDates.length > 0 ? new Set(serviceDates.map(sd => sd.serviceId)) : null;
+
+  // If service dates exist for this date but no active services, buses don't run - return empty
+  if (anyServiceDatesForDate && (!activeServiceIds || activeServiceIds.size === 0)) {
+    return [];
+  }
+
+  // Build query - filter by service dates if available
+  // Only fall back to all trips if service dates don't exist at all (future date beyond GTFS range)
+  const stopTimesWhere: Parameters<typeof db.stopTime.findMany>[0]['where'] = {
+    stopId: stop.id,
+  };
+
+  if (activeServiceIds && activeServiceIds.size > 0) {
+    // Filter by active services for this date
+    stopTimesWhere.trip = {
+      serviceId: {
+        in: Array.from(activeServiceIds),
+      },
+    };
+  }
+
+  // Get all stop times for this stop, optionally filtered by active services
+  const stopTimes = await db.stopTime.findMany({
+    where: stopTimesWhere,
     include: {
       trip: {
         include: {
@@ -113,14 +155,57 @@ export async function getRouteDeparturesAtStop(
     return [];
   }
 
-  // Get stop times for this route and stop - ignore service dates, just use weekly patterns
-  const stopTimes = await db.stopTime.findMany({
+  // Normalize date for comparison - use same method as parseGTFSDate to ensure consistency
+  // parseGTFSDate creates dates in local timezone: new Date(year, month - 1, day)
+  // This ensures dates match how they were stored in the database
+  const queryDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  // Check if any service dates exist for this date (to know if GTFS data covers this date)
+  const anyServiceDatesForDate = await db.serviceDate.findFirst({
     where: {
-      stopId: stop.id,
-      trip: {
-        routeId: route.id,
-      },
+      date: queryDate,
     },
+  });
+
+  // Get all service dates for this date that are active
+  // exceptionType: 1 = service added (runs), 2 = service removed (doesn't run)
+  const serviceDates = await db.serviceDate.findMany({
+    where: {
+      date: queryDate,
+      exceptionType: 1, // Only get services that are active on this date
+    },
+  });
+
+  // Extract service IDs that are active on this date
+  const activeServiceIds = serviceDates.length > 0 ? new Set(serviceDates.map(sd => sd.serviceId)) : null;
+
+  // If service dates exist for this date but no active services, buses don't run - return empty
+  if (anyServiceDatesForDate && (!activeServiceIds || activeServiceIds.size === 0)) {
+    return [];
+  }
+
+  // Build query - filter by service dates if available
+  // Only fall back to all trips if service dates don't exist at all (future date beyond GTFS range)
+  const stopTimesWhere: Parameters<typeof db.stopTime.findMany>[0]['where'] = {
+    stopId: stop.id,
+    trip: {
+      routeId: route.id,
+    },
+  };
+
+  if (activeServiceIds && activeServiceIds.size > 0) {
+    // Filter by active services for this date
+    stopTimesWhere.trip = {
+      routeId: route.id,
+      serviceId: {
+        in: Array.from(activeServiceIds),
+      },
+    };
+  }
+
+  // Get stop times for this route and stop, optionally filtered by active services
+  const stopTimes = await db.stopTime.findMany({
+    where: stopTimesWhere,
     include: {
       trip: {
         include: {

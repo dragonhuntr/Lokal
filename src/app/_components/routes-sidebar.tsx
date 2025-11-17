@@ -412,6 +412,12 @@ export function RoutesSidebar({
     sessionTokenRef.current = null;
   }, []);
 
+  // Effective origin is either user's GPS location or manually set origin
+  const effectiveOrigin = useMemo(
+    () => userLocation ?? (manualOrigin ? { latitude: manualOrigin.latitude, longitude: manualOrigin.longitude } : null),
+    [userLocation, manualOrigin]
+  );
+
   // Place search - now works in explore mode
   useEffect(() => {
     // Only run search in explore mode when user is typing
@@ -442,8 +448,8 @@ export function RoutesSidebar({
             session_token: sessionToken,
             access_token: env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
           });
-          if (userLocation) {
-            params.set("proximity", `${userLocation.longitude},${userLocation.latitude}`);
+          if (effectiveOrigin) {
+            params.set("proximity", `${effectiveOrigin.longitude},${effectiveOrigin.latitude}`);
           }
 
           const response = await fetch(
@@ -518,7 +524,7 @@ export function RoutesSidebar({
       window.clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeQuery, mode, ensureSessionToken]);
+  }, [placeQuery, mode, effectiveOrigin, ensureSessionToken]);
 
   // Origin search - for when user doesn't have location access
   useEffect(() => {
@@ -842,72 +848,85 @@ export function RoutesSidebar({
               />
             ) : mode === "explore" && (view === "routes" || view === "places") ? (
               <>
-                {/* Starting Location Search Input - Show when no location access */}
-                {!hasOrigin && !userLocation && (
-                  <>
-                    <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2">
-                      <MapPin className="h-4 w-4 text-amber-600" />
-                      <input
-                        type="search"
-                        value={originQuery}
-                        onChange={(event) => setOriginQuery(event.target.value)}
-                        placeholder={session.user === null ? "Sign in to search for starting location." : "Search for your starting location…"}
-                        className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-amber-700/60"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck="false"
-                        disabled={session.user === null}
-                      />
-                      {isOriginLoading && <Spinner size="sm" className="text-amber-600" />}
-                    </div>
-                    {originQuery.trim() && (
-                      <div className="mb-3 max-h-64 overflow-y-auto rounded-md border bg-card">
-                        {originResults.length > 0 ? (
-                          <ul className="space-y-1 p-2">
-                            {originResults.map((place) => {
-                              const summaryContext = place.context.join(" • ");
-                              const subtitle =
-                                place.address ??
-                                (summaryContext.length > 0 ? summaryContext : place.placeName);
+                {/* Starting Location Search Input - Always visible for setting/changing origin */}
+                <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2">
+                  <MapPin className="h-4 w-4 text-amber-600" />
+                  <input
+                    type="search"
+                    value={originQuery}
+                    onChange={(event) => setOriginQuery(event.target.value)}
+                    placeholder={
+                      session.user === null 
+                        ? "Sign in to set starting point" 
+                        : manualOrigin 
+                          ? manualOrigin.name 
+                          : userLocation 
+                            ? "Your location" 
+                            : "Set starting point"
+                    }
+                    className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-amber-700/60"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
+                    disabled={session.user === null}
+                  />
+                  {isOriginLoading && <Spinner size="sm" className="text-amber-600" />}
+                  {manualOrigin && originQuery === "" && (
+                    <button
+                      onClick={() => onSetManualOrigin?.(null)}
+                      className="text-amber-600 hover:text-amber-800"
+                      title="Clear starting point"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {originQuery.trim() && (
+                  <div className="mb-3 max-h-64 overflow-y-auto rounded-md border bg-card">
+                    {originResults.length > 0 ? (
+                      <ul className="space-y-1 p-2">
+                        {originResults.map((place) => {
+                          const summaryContext = place.context.join(" • ");
+                          const subtitle =
+                            place.address ??
+                            (summaryContext.length > 0 ? summaryContext : place.placeName);
 
-                              return (
-                                <li key={place.mapboxId}>
-                                  <button
-                                    className="w-full rounded-md border bg-card px-3 py-3 text-left shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
-                                    onClick={() => handleSelectOrigin(place)}
-                                    title={place.placeName}
-                                  >
-                                    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-1">
-                                      <div className="min-w-0">
-                                        <div className="truncate text-xs text-muted-foreground">
-                                          {subtitle}
-                                        </div>
-                                        <div className="mt-1 truncate text-base font-semibold tracking-tight text-foreground">
-                                          {place.name}
-                                        </div>
-                                        <div className="mt-1 truncate text-xs text-muted-foreground">
-                                          {place.placeName}
-                                        </div>
-                                      </div>
+                          return (
+                            <li key={place.mapboxId}>
+                              <button
+                                className="w-full rounded-md border bg-card px-3 py-3 text-left shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
+                                onClick={() => handleSelectOrigin(place)}
+                                title={place.placeName}
+                              >
+                                <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-1">
+                                  <div className="min-w-0">
+                                    <div className="truncate text-xs text-muted-foreground">
+                                      {subtitle}
                                     </div>
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        ) : originError ? (
-                          <div className="p-4 text-center text-sm text-muted-foreground">
-                            {originError}
-                          </div>
-                        ) : (
-                          <div className="p-4 text-center text-sm text-muted-foreground">
-                            No places found.
-                          </div>
-                        )}
+                                    <div className="mt-1 truncate text-base font-semibold tracking-tight text-foreground">
+                                      {place.name}
+                                    </div>
+                                    <div className="mt-1 truncate text-xs text-muted-foreground">
+                                      {place.placeName}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : originError ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        {originError}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        No places found.
                       </div>
                     )}
-                  </>
+                  </div>
                 )}
 
                 {/* Location Search Input - Always visible in explore mode */}
