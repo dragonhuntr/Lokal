@@ -448,7 +448,43 @@ const StopDepartureInfoSchema = z.object({
 
 export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartureInfo[]> => {
   try {
-    // Use Redis cache with cache-aside pattern
+    // If stopId is provided, use the single-stop endpoint for better future departure support
+    if (stopId) {
+      const stopDeparture = await getCached<StopDepartureInfo | null>(
+        CACHE_KEYS.DEPARTURES_BY_STOP(stopId),
+        async () => {
+          const response = await fetch(
+            `https://emta.availtec.com/InfoPoint/rest/stopdepartures/get/${stopId}`
+          );
+
+          if (!response.ok) {
+            throw new Error(`API request failed with status ${response.status}`);
+          }
+
+          const json: unknown = await response.json();
+          // Single-stop endpoint may return a single object, an array with one element, or an empty array
+          // Handle all cases for compatibility
+          if (Array.isArray(json)) {
+            if (json.length === 0) {
+              // Empty array means no departures - return null (will be handled as empty result)
+              return null;
+            }
+            return StopDepartureInfoSchema.parse(json[0]);
+          }
+          return StopDepartureInfoSchema.parse(json);
+        },
+        CACHE_TTL.DEPARTURES
+      );
+
+      // If cached result is null (no departures), return empty array
+      if (!stopDeparture) {
+        return [];
+      }
+
+      return [stopDeparture];
+    }
+
+    // When no stopId provided, fetch all stop departures
     const allDepartures = await getCached<StopDepartureInfo[]>(
       CACHE_KEYS.DEPARTURES,
       async () => {
@@ -465,11 +501,6 @@ export const fetchStopDepartures = async (stopId?: number): Promise<StopDepartur
       },
       CACHE_TTL.DEPARTURES
     );
-
-    // Filter by stopId if provided
-    if (stopId) {
-      return allDepartures.filter((departure) => departure.StopId === stopId);
-    }
 
     return allDepartures;
   } catch (error) {

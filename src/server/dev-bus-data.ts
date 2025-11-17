@@ -3,7 +3,7 @@
  * Generates realistic fake buses for testing when NODE_ENV is "development"
  */
 
-import type { RouteDetails } from "@/server/bus-api";
+import type { RouteDetails, StopDepartureInfo } from "@/server/bus-api";
 
 interface FakeBusConfig {
   routeId: number;
@@ -125,13 +125,99 @@ export function shouldUseFakeBuses(): boolean {
   if (process.env.NODE_ENV !== "development") {
     return false;
   }
-  
+
   // Allow explicit override via environment variable
   const enableFakeBuses = process.env.ENABLE_FAKE_BUSES;
   if (enableFakeBuses !== undefined) {
     return enableFakeBuses.toLowerCase() === "true";
   }
-  
+
   // Default to true in development mode
   return true;
+}
+
+/**
+ * Generate fake stop departures for route planning in dev mode
+ * Creates realistic departure schedules with 15-30 minute intervals
+ */
+export function generateFakeDepartures(
+  stopId: number,
+  routeId: number
+): StopDepartureInfo | null {
+  if (!shouldUseFakeBuses()) {
+    return null;
+  }
+
+  console.log(`[DEV MODE] Generating fake departures for stop ${stopId}, route ${routeId}`);
+
+  const now = new Date();
+  const departures = [];
+
+  // Generate 6 departures over the next 3 hours (every 30 minutes)
+  for (let i = 0; i < 6; i++) {
+    const minutesFromNow = 15 + i * 30; // 15, 45, 75, 105, 135, 165 minutes
+    const departureTime = new Date(now.getTime() + minutesFromNow * 60 * 1000);
+    const arrivalTime = new Date(departureTime.getTime() + 10 * 60 * 1000); // +10 min arrival
+
+    departures.push({
+      ADT: null,
+      ADTLocalTime: null,
+      ATA: null,
+      ATALocalTime: null,
+      Bay: null,
+      Dev: "0",
+      EDT: departureTime.toISOString(),
+      EDTLocalTime: departureTime.toISOString(),
+      ETA: arrivalTime.toISOString(),
+      ETALocalTime: arrivalTime.toISOString(),
+      IsCompleted: false,
+      IsLastStopOnTrip: false,
+      LastUpdated: now.toISOString(),
+      LastUpdatedLocalTime: now.toISOString(),
+      Mode: 0,
+      ModeReportLabel: "On Time",
+      PropogationStatus: 0,
+      SDT: departureTime.toISOString(),
+      SDTLocalTime: departureTime.toISOString(),
+      STA: arrivalTime.toISOString(),
+      STALocalTime: arrivalTime.toISOString(),
+      StopFlag: 0,
+      StopStatus: 0,
+      StopStatusReportLabel: "On Time",
+      Trip: {
+        BlockFareboxId: 9000 + i,
+        GtfsTripId: `fake-trip-${routeId}-${i}`,
+        InternalSignDesc: "Fake Trip",
+        InternetServiceDesc: "Fake Trip",
+        IVRServiceDesc: "Fake Trip",
+        StopSequence: i + 1,
+        TripDirection: "Outbound",
+        TripId: 9000 + i,
+        TripRecordId: 9000 + i,
+        TripStartTime: departureTime.toISOString(),
+        TripStartTimeLocalTime: departureTime.toISOString(),
+        TripStatus: 1,
+        TripStatusReportLabel: "Active",
+      },
+      PropertyName: "",
+    });
+  }
+
+  return {
+    LastUpdated: now.toISOString(),
+    StopId: stopId,
+    RouteDirections: [
+      {
+        Direction: "Outbound",
+        DirectionCode: "0",
+        RouteId: routeId.toString(),
+        RouteRecordId: routeId,
+        Departures: departures,
+        HeadwayDepartures: null,
+        IsDone: false,
+        IsHeadway: false,
+        IsHeadwayMonitored: false,
+      },
+    ],
+  };
 }

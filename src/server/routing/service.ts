@@ -4,7 +4,11 @@ import type { Stop, Route as PrismaRoute } from "@prisma/client";
 
 import { db } from "@/server/db";
 import { fetchRoutes } from "@/server/bus-api";
-import { getNextDeparture, type DataSource } from "./realtime-helpers";
+import { departureOrchestrator } from "./data-sources/orchestrator";
+import { DataSourceType } from "./data-sources/base";
+
+// Map new DataSourceType enum to old string type for backward compatibility
+export type DataSource = "realtime" | "scheduled" | "estimated";
 
 export interface Coordinate {
   latitude: number;
@@ -132,7 +136,7 @@ function normalizeLimit(limit?: number) {
 }
 
 async function fetchNetwork() {
-  return db.route.findMany({
+  const routes = await db.route.findMany({
     include: {
       stops: {
         orderBy: {
@@ -141,6 +145,63 @@ async function fetchNetwork() {
       },
     },
   });
+
+  // For each route, get stops from a single representative trip to ensure correct ordering
+  // This ensures stops are in the correct sequence for distance calculations
+  for (const route of routes) {
+    // Get all trips for this route with their stop counts
+    const trips = await db.trip.findMany({
+      where: {
+        routeId: route.id,
+      },
+      include: {
+        _count: {
+          select: {
+            stopTimes: true,
+          },
+        },
+      },
+    });
+
+    if (trips.length === 0) {
+      // No trips found, keep existing route.stops
+      route.stops.sort((a, b) => a.sequence - b.sequence);
+      continue;
+    }
+
+    // Find the trip with the most stops
+    const representativeTripId = trips.reduce((max, trip) => 
+      trip._count.stopTimes > max._count.stopTimes ? trip : max
+    ).id;
+
+    // Fetch the representative trip with its stopTimes
+    const representativeTrip = await db.trip.findUnique({
+      where: { id: representativeTripId },
+      include: {
+        stopTimes: {
+          include: {
+            stop: true,
+          },
+          orderBy: {
+            stopSequence: "asc",
+          },
+        },
+      },
+    });
+
+    if (representativeTrip && representativeTrip.stopTimes.length > 0) {
+      // Replace route.stops with stops from the representative trip in correct order
+      route.stops = representativeTrip.stopTimes.map((stopTime) => ({
+        ...stopTime.stop,
+        sequence: stopTime.stopSequence,
+      }));
+    } else {
+      // Fallback: use existing route.stops if no trip found
+      route.stops.sort((a, b) => a.sequence - b.sequence);
+    }
+  }
+
+  return routes;
 }
 
 type Network = Awaited<ReturnType<typeof fetchNetwork>>;
@@ -172,50 +233,51 @@ async function buildLegs(
 
   // Use current time as default if departureTime is not provided
   const effectiveDepartureTime = departureTime ?? new Date();
-  
+
   // Calculate when user arrives at the bus stop (after walking)
   const arrivalAtStopTime = new Date(effectiveDepartureTime.getTime() + walkingToStopMinutes * 60 * 1000);
 
-  // Try to get real-time departure information
-  let nextDeparture: Awaited<ReturnType<typeof getNextDeparture>> | null = null;
+  // Try to get departure information using orchestrator (real-time → GTFS fallback)
   let busMinutes = staticBusMinutes;
   let waitTimeMinutes = 0;
   let busDataSource: DataSource = "estimated";
   let busDepartureTime: Date | undefined;
 
-  // Use numeric IDs directly from the database instead of parsing formatted strings
+  // Use numeric IDs directly from the database
   const stopNumericId = startStop.stopNumericId;
   const routeNumericId = route.routeNumericId;
-  
-  // Always require real-time or scheduled data for bus legs - never use estimated
-  // If we can't get real-time/scheduled data, return null to prevent showing misleading itineraries
+
+  // Require real-time or scheduled data - no estimated fallback
   if (!stopNumericId || !routeNumericId) {
-    // Missing numeric IDs means we can't fetch real-time data - don't show estimated itinerary
-    console.warn(`Missing numeric IDs for stop ${startStop.id} or route ${route.id} - cannot fetch real-time data`);
     return null;
   }
-  
+
   try {
-    nextDeparture = await getNextDeparture(stopNumericId.toString(), routeNumericId.toString(), arrivalAtStopTime);
-    if (nextDeparture) {
-      waitTimeMinutes = nextDeparture.waitTimeMinutes;
-      busDepartureTime = nextDeparture.departureTime;
-      busDataSource = nextDeparture.dataSource;
-      
-      // If we have arrival time from real-time data, use it
-      if (nextDeparture.arrivalTime && endStop.id) {
-        // Calculate travel time from departure to arrival
-        const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
-        busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
-      }
-    } else {
-      // No buses available - return null to prevent showing misleading itinerary
+    // Use orchestrator for automatic real-time → GTFS fallback
+    const nextDeparture = await departureOrchestrator.getNextDeparture(
+      stopNumericId,
+      routeNumericId,
+      arrivalAtStopTime
+    );
+
+    if (!nextDeparture) {
+      // No buses available from any source - return null
       return null;
     }
+
+    waitTimeMinutes = nextDeparture.waitTimeMinutes;
+    busDepartureTime = nextDeparture.departureTime;
+    // Convert enum to string for backward compatibility
+    busDataSource = nextDeparture.dataSource as DataSource;
+
+    // If we have arrival time, use it to calculate actual travel time
+    if (nextDeparture.arrivalTime) {
+      const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
+      busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
+    }
   } catch (error) {
-    console.warn(`Failed to fetch real-time departure for stop ${startStop.id}, route ${route.id}:`, error);
-    // API failed - don't show estimated itinerary, return null instead
-    // Estimated times are misleading - we need real-time or scheduled data
+    console.warn(`Failed to fetch departure for stop ${startStop.id}, route ${route.id}:`, error);
+    // Error in orchestrator - return null, don't show itinerary
     return null;
   }
 
@@ -407,7 +469,7 @@ function findCandidates(
       }
     }
   }
-
+  
   return candidates;
 }
 
@@ -419,7 +481,62 @@ async function planSegmentItineraries(
   limit: number,
   departureTime?: Date
 ): Promise<PlanItinerary[]> {
-  const candidates = findCandidates(network, origin, destination, maxWalkingDistanceMeters);
+  let candidates = findCandidates(network, origin, destination, maxWalkingDistanceMeters);
+  
+  // If no candidates found, try to find routes with stops near origin
+  // and allow walking from the closest stop to destination (even if far)
+  if (candidates.length === 0) {
+    // For each route, check if it has stops near origin
+    for (const route of network) {
+      if (!route.stops || route.stops.length < 2) continue;
+
+      const originCandidates = route.stops
+        .map((stop, index) => {
+          const distance = haversineDistanceMeters(
+            { latitude: stop.latitude, longitude: stop.longitude },
+            origin
+          );
+          return { stop, distance, index };
+        })
+        .filter((entry) => entry.distance <= maxWalkingDistanceMeters);
+
+      if (originCandidates.length === 0) continue;
+
+      // Find the closest stop to destination on this route (even if far)
+      const closestDestStop = route.stops
+        .map((stop, index) => {
+          const distance = haversineDistanceMeters(
+            { latitude: stop.latitude, longitude: stop.longitude },
+            destination
+          );
+          return { stop, distance, index };
+        })
+        .sort((a, b) => a.distance - b.distance)[0];
+
+      if (!closestDestStop) continue;
+
+      // Create candidates for each origin stop, allowing walk from closest stop to destination
+      for (const start of originCandidates) {
+        if (closestDestStop.index <= start.index) continue;
+
+        const stopCount = closestDestStop.index - start.index + 1;
+        const busDistance = sumSegmentDistance(route.stops, start.index, closestDestStop.index);
+        if (!Number.isFinite(busDistance) || busDistance <= 0) continue;
+
+        candidates.push({
+          route,
+          startStop: start.stop,
+          endStop: closestDestStop.stop,
+          startStopIndex: start.index,
+          endStopIndex: closestDestStop.index,
+          startDistanceMeters: start.distance,
+          endDistanceMeters: closestDestStop.distance, // Allow walking even if far
+          busDistanceMeters: busDistance,
+          stopCount,
+        });
+      }
+    }
+  }
 
   // Build all itineraries in parallel
   const itineraryPromises = candidates.map((candidate) =>

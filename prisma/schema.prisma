@@ -34,6 +34,7 @@ model Route {
   createdAt      DateTime @default(now())
 
   stops Stop[]
+  trips Trip[]
 
   @@index([routeNumericId])
 }
@@ -47,6 +48,8 @@ model Stop {
   sequence       Int
   routeId        String
   route          Route  @relation(fields: [routeId], references: [id])
+
+  stopTimes StopTime[]
 
   @@index([routeId])
   @@index([stopNumericId])
@@ -83,4 +86,65 @@ model SavedItem {
 enum ItemType {
   ROUTE
   JOURNEY
+}
+
+model Service {
+  id        String   @id @default(cuid())
+  serviceId Int      @unique // GTFS service_id (e.g., 39, 43, 45)
+  name      String?  // Optional friendly name
+  createdAt DateTime @default(now())
+
+  serviceDates ServiceDate[]
+  trips        Trip[]
+
+  @@index([serviceId])
+}
+
+model ServiceDate {
+  id            String   @id @default(cuid())
+  serviceId     Int
+  date          DateTime @db.Date
+  exceptionType Int // 1 = service added, 2 = service removed
+
+  service Service @relation(fields: [serviceId], references: [serviceId])
+
+  @@unique([serviceId, date])
+  @@index([serviceId, date])
+  @@index([date])
+}
+
+model Trip {
+  id          String   @id @default(cuid())
+  gtfsTripId  String   @unique // GTFS trip_id (e.g., "t1B3-b17D9-sl2B")
+  routeId     String
+  serviceId   Int
+  directionId Int // 0 or 1
+  headsign    String // Trip headsign/destination
+  shapeId     String? // Optional shape for visualization
+  createdAt   DateTime @default(now())
+
+  route     Route      @relation(fields: [routeId], references: [id])
+  service   Service    @relation(fields: [serviceId], references: [serviceId])
+  stopTimes StopTime[]
+
+  @@index([routeId])
+  @@index([serviceId])
+  @@index([gtfsTripId])
+}
+
+model StopTime {
+  id            String  @id @default(cuid())
+  tripId        String
+  stopId        String
+  arrivalTime   String // Stored as string due to 25:00:00+ format
+  departureTime String // Stored as string due to 25:00:00+ format
+  stopSequence  Int
+  isTimepoint   Boolean @default(false)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stop Stop @relation(fields: [stopId], references: [id])
+
+  @@index([tripId, stopSequence])
+  @@index([stopId])
+  @@index([stopId, departureTime])
 }
