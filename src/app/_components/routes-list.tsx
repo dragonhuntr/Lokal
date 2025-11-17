@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
-import { Bus, Search } from "lucide-react";
+import { Bus, Search, AlertCircle } from "lucide-react";
 import type { RouterOutputs } from "@/trpc/react";
 
 import { Spinner } from "@/components/ui/spinner";
@@ -70,7 +70,13 @@ export function RoutesList({
   const statusMessage = useMemo(() => {
     if (isLoading) return "Loading routes…";
     if (!routes?.length) return "No routes available.";
-    if (!routeQuery.trim()) return;
+    if (!routeQuery.trim()) {
+      // Check if vehicles have loaded and there are no active buses
+      if (hasVehiclesLoaded && filteredRoutes.length === 0 && routes.length > 0) {
+        return "No buses available";
+      }
+      return;
+    }
     return `${filteredRoutes.length} route${filteredRoutes.length === 1 ? "" : "s"} match`;
   }, [isLoading, routes, filteredRoutes, routeQuery, hasVehiclesLoaded]);
 
@@ -105,6 +111,18 @@ export function RoutesList({
                     </div>
                   </li>
                 ))
+              ) : hasVehiclesLoaded && filteredRoutes.length === 0 && routes && routes.length > 0 ? (
+                <li>
+                  <div className="w-full rounded-2xl border bg-card px-4 py-6 text-center">
+                    <AlertCircle className="h-8 w-8 mx-auto mb-2 text-muted-foreground opacity-60" />
+                    <div className="text-sm font-medium text-foreground mb-1">
+                      No buses available
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      There are currently no active buses on any routes.
+                    </div>
+                  </div>
+                </li>
               ) : (
                 filteredRoutes.map((route) => {
                 const colorValue = (route.Color ?? "").trim();

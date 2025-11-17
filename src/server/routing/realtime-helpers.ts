@@ -39,6 +39,54 @@ function parseApiDate(dateString: string): Date {
 }
 
 /**
+ * Converts route ID to number (handles both numeric strings and formatted strings for backward compatibility)
+ */
+function parseRouteId(routeId: string | number): number | null {
+  if (typeof routeId === "number") {
+    return routeId;
+  }
+  
+  // Try parsing as direct number first (preferred - should be numeric ID from DB)
+  const numericId = parseInt(routeId, 10);
+  if (!isNaN(numericId)) {
+    return numericId;
+  }
+  
+  // Fallback: parse formatted string (for backward compatibility)
+  const match = routeId.match(/^route-(\d+)$/);
+  if (match) {
+    const parsed = parseInt(match[1], 10);
+    return isNaN(parsed) ? null : parsed;
+  }
+  
+  return null;
+}
+
+/**
+ * Converts stop ID to number (handles both numeric strings and formatted strings for backward compatibility)
+ */
+function parseStopId(stopId: string | number): number | null {
+  if (typeof stopId === "number") {
+    return stopId;
+  }
+  
+  // Try parsing as direct number first (preferred - should be numeric ID from DB)
+  const numericId = parseInt(stopId, 10);
+  if (!isNaN(numericId)) {
+    return numericId;
+  }
+  
+  // Fallback: parse formatted string (for backward compatibility)
+  const match = stopId.match(/^stop-\d+-(\d+)-\d+$/);
+  if (match) {
+    const parsed = parseInt(match[1], 10);
+    return isNaN(parsed) ? null : parsed;
+  }
+  
+  return null;
+}
+
+/**
  * Gets the next available departure for a specific stop and route
  */
 export async function getNextDeparture(
@@ -47,10 +95,17 @@ export async function getNextDeparture(
   requestedDepartureTime: Date
 ): Promise<NextDepartureInfo | null> {
   try {
-    // Convert stopId to number if it's a string
-    const stopIdNum = typeof stopId === "string" ? parseInt(stopId, 10) : stopId;
-    if (isNaN(stopIdNum)) {
-      console.warn(`Invalid stopId: ${stopId}`);
+    // Parse numeric IDs (prefers direct numeric IDs from DB, falls back to parsing formatted strings)
+    const stopIdNum = parseStopId(stopId);
+    const routeIdNum = parseRouteId(routeId);
+    
+    if (!stopIdNum) {
+      console.warn(`Invalid stopId format: ${stopId}`);
+      return null;
+    }
+    
+    if (!routeIdNum) {
+      console.warn(`Invalid routeId format: ${routeId}`);
       return null;
     }
 
@@ -62,9 +117,15 @@ export async function getNextDeparture(
       return null;
     }
 
-    // Find the route direction matching the routeId
+    // Find the route direction matching the routeId (compare as numbers or strings)
     const routeDirection = stopInfo.RouteDirections.find(
-      (rd) => rd.RouteId === routeId || rd.RouteRecordId.toString() === routeId
+      (rd) => {
+        const rdRouteId = parseInt(rd.RouteId, 10);
+        return (!isNaN(rdRouteId) && rdRouteId === routeIdNum) || 
+               rd.RouteId === routeId || 
+               rd.RouteRecordId === routeIdNum ||
+               rd.RouteRecordId.toString() === routeId;
+      }
     );
 
     if (!routeDirection) {
@@ -99,59 +160,57 @@ export async function getNextDeparture(
       return null;
     }
 
-    // For future times, prefer scheduled times (SDT)
-    // For current/immediate trips, prefer real-time estimates (EDT)
-    const relevantDepartures = departures
+    // Check ALL scheduled departures regardless of time to find the next available bus
+    // This allows us to find buses that may be days away when no buses are running now
+    // Always prefer real-time data (EDT) when available, fallback to scheduled (SDT)
+    const allScheduledDepartures = departures
       .map((dep) => {
-        if (isFuture) {
-          // Use scheduled time for future planning
-          const scheduledTime = dep.SDT ? parseApiDate(dep.SDT) : null;
-          const scheduledLocalTime = dep.SDTLocalTime ? parseApiDate(dep.SDTLocalTime) : null;
-          const departureTime = scheduledLocalTime ?? scheduledTime;
+        // Always prefer real-time estimate (EDT) when available, fallback to scheduled (SDT)
+        const estimatedTime = dep.EDTLocalTime ? parseApiDate(dep.EDTLocalTime) : (dep.EDT ? parseApiDate(dep.EDT) : null);
+        const scheduledTime = dep.SDTLocalTime ? parseApiDate(dep.SDTLocalTime) : (dep.SDT ? parseApiDate(dep.SDT) : null);
+        const departureTime = estimatedTime ?? scheduledTime;
+        
+        if (departureTime) {
+          // Prefer real-time arrival (ETA) when available, fallback to scheduled (STA)
+          const estimatedArrival = dep.ETALocalTime ? parseApiDate(dep.ETALocalTime) : (dep.ETA ? parseApiDate(dep.ETA) : null);
+          const scheduledArrival = dep.STALocalTime ? parseApiDate(dep.STALocalTime) : (dep.STA ? parseApiDate(dep.STA) : null);
+          const arrivalTime = estimatedArrival ?? scheduledArrival;
           
-          if (departureTime && departureTime.getTime() >= requestedTime) {
-            const arrivalTime = dep.STA ? parseApiDate(dep.STA) : (dep.STALocalTime ? parseApiDate(dep.STALocalTime) : null);
-            return {
-              departureTime,
-              arrivalTime,
-              dataSource: "scheduled" as DataSource,
-              tripId: dep.Trip?.TripId,
-            };
-          }
-        } else {
-          // Use real-time estimate for current/immediate trips
-          const estimatedTime = dep.EDTLocalTime ? parseApiDate(dep.EDTLocalTime) : (dep.EDT ? parseApiDate(dep.EDT) : null);
-          const scheduledTime = dep.SDTLocalTime ? parseApiDate(dep.SDTLocalTime) : (dep.SDT ? parseApiDate(dep.SDT) : null);
-          const departureTime = estimatedTime ?? scheduledTime;
-          
-          if (departureTime && departureTime.getTime() >= requestedTime) {
-            const arrivalTime = dep.ETALocalTime ? parseApiDate(dep.ETALocalTime) : (dep.ETA ? parseApiDate(dep.ETA) : null);
-            return {
-              departureTime,
-              arrivalTime,
-              dataSource: estimatedTime ? "realtime" : "scheduled" as DataSource,
-              tripId: dep.Trip?.TripId,
-            };
-          }
+          return {
+            departureTime,
+            arrivalTime,
+            dataSource: estimatedTime ? "realtime" : "scheduled" as DataSource,
+            tripId: dep.Trip?.TripId,
+          };
         }
         return null;
       })
       .filter((dep): dep is NonNullable<typeof dep> => dep !== null)
       .sort((a, b) => a.departureTime.getTime() - b.departureTime.getTime());
 
-    if (relevantDepartures.length === 0) {
+    if (allScheduledDepartures.length === 0) {
       return null;
     }
 
-    const next = relevantDepartures[0];
-    const waitTimeMs = next.departureTime.getTime() - requestedTime;
+    // Find the next departure that is >= requestedTime
+    // This allows us to find buses even if they're days away when no buses are running now
+    const nextDeparture = allScheduledDepartures.find(
+      (dep) => dep.departureTime.getTime() >= requestedTime
+    );
+
+    // If no departure >= requestedTime exists, return null (no buses available)
+    if (!nextDeparture) {
+      return null;
+    }
+
+    const waitTimeMs = nextDeparture.departureTime.getTime() - requestedTime;
 
     return {
-      departureTime: next.departureTime,
-      arrivalTime: next.arrivalTime,
+      departureTime: nextDeparture.departureTime,
+      arrivalTime: nextDeparture.arrivalTime,
       waitTimeMinutes: Math.max(0, waitTimeMs / (60 * 1000)),
-      dataSource: next.dataSource,
-      tripId: next.tripId,
+      dataSource: nextDeparture.dataSource,
+      tripId: nextDeparture.tripId,
     };
   } catch (error) {
     console.error(`Error fetching next departure for stop ${stopId}, route ${routeId}:`, error);
