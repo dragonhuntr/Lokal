@@ -28,8 +28,6 @@ export interface PlanRequest {
 
 export type LegType = "walk" | "bus";
 
-export type DataSource = "realtime" | "scheduled" | "estimated";
-
 export interface PlanLeg {
   type: LegType;
   distanceMeters: number;
@@ -164,7 +162,7 @@ async function buildLegs(
   origin: Coordinate,
   destination: Coordinate,
   departureTime?: Date
-): Promise<PlanLeg[]> {
+): Promise<PlanLeg[] | null> {
   const { route, startStop, endStop, startStopIndex, endStopIndex, startDistanceMeters, endDistanceMeters, busDistanceMeters, stopCount } =
     candidate;
 
@@ -172,10 +170,11 @@ async function buildLegs(
   const walkingFromStopMinutes = walkingTimeMinutes(endDistanceMeters);
   const staticBusMinutes = busTimeMinutes(busDistanceMeters, stopCount);
 
+  // Use current time as default if departureTime is not provided
+  const effectiveDepartureTime = departureTime ?? new Date();
+  
   // Calculate when user arrives at the bus stop (after walking)
-  const arrivalAtStopTime = departureTime
-    ? new Date(departureTime.getTime() + walkingToStopMinutes * 60 * 1000)
-    : undefined;
+  const arrivalAtStopTime = new Date(effectiveDepartureTime.getTime() + walkingToStopMinutes * 60 * 1000);
 
   // Try to get real-time departure information
   let nextDeparture: Awaited<ReturnType<typeof getNextDeparture>> | null = null;
@@ -184,25 +183,40 @@ async function buildLegs(
   let busDataSource: DataSource = "estimated";
   let busDepartureTime: Date | undefined;
 
-  if (departureTime && arrivalAtStopTime && startStop.id && route.id) {
-    try {
-      nextDeparture = await getNextDeparture(startStop.id, route.id, arrivalAtStopTime);
-      if (nextDeparture) {
-        waitTimeMinutes = nextDeparture.waitTimeMinutes;
-        busDepartureTime = nextDeparture.departureTime;
-        busDataSource = nextDeparture.dataSource;
-        
-        // If we have arrival time from real-time data, use it
-        if (nextDeparture.arrivalTime && endStop.id) {
-          // Calculate travel time from departure to arrival
-          const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
-          busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
-        }
+  // Use numeric IDs directly from the database instead of parsing formatted strings
+  const stopNumericId = startStop.stopNumericId;
+  const routeNumericId = route.routeNumericId;
+  
+  // Always require real-time or scheduled data for bus legs - never use estimated
+  // If we can't get real-time/scheduled data, return null to prevent showing misleading itineraries
+  if (!stopNumericId || !routeNumericId) {
+    // Missing numeric IDs means we can't fetch real-time data - don't show estimated itinerary
+    console.warn(`Missing numeric IDs for stop ${startStop.id} or route ${route.id} - cannot fetch real-time data`);
+    return null;
+  }
+  
+  try {
+    nextDeparture = await getNextDeparture(stopNumericId.toString(), routeNumericId.toString(), arrivalAtStopTime);
+    if (nextDeparture) {
+      waitTimeMinutes = nextDeparture.waitTimeMinutes;
+      busDepartureTime = nextDeparture.departureTime;
+      busDataSource = nextDeparture.dataSource;
+      
+      // If we have arrival time from real-time data, use it
+      if (nextDeparture.arrivalTime && endStop.id) {
+        // Calculate travel time from departure to arrival
+        const travelTimeMs = nextDeparture.arrivalTime.getTime() - nextDeparture.departureTime.getTime();
+        busMinutes = Math.max(0, travelTimeMs / (60 * 1000));
       }
-    } catch (error) {
-      console.warn(`Failed to fetch real-time departure for stop ${startStop.id}, route ${route.id}:`, error);
-      // Fall back to static calculation
+    } else {
+      // No buses available - return null to prevent showing misleading itinerary
+      return null;
     }
+  } catch (error) {
+    console.warn(`Failed to fetch real-time departure for stop ${startStop.id}, route ${route.id}:`, error);
+    // API failed - don't show estimated itinerary, return null instead
+    // Estimated times are misleading - we need real-time or scheduled data
+    return null;
   }
 
   const walkLegStart: PlanLeg = {
@@ -268,8 +282,14 @@ async function buildItinerary(
   origin: Coordinate,
   destination: Coordinate,
   departureTime?: Date
-): Promise<PlanItinerary> {
+): Promise<PlanItinerary | null> {
   const legs = await buildLegs(candidate, origin, destination, departureTime);
+  
+  // If buildLegs returned null, no buses are available
+  if (!legs) {
+    return null;
+  }
+  
   const totalDistanceMeters = legs.reduce((sum, leg) => sum + leg.distanceMeters, 0);
   
   // Total duration includes wait time at bus stop
@@ -405,7 +425,28 @@ async function planSegmentItineraries(
   const itineraryPromises = candidates.map((candidate) =>
     buildItinerary(candidate, origin, destination, departureTime)
   );
-  const itineraries = await Promise.all(itineraryPromises);
+  const allItineraries = await Promise.all(itineraryPromises);
+  
+  // Filter out null itineraries (no buses available)
+  // Also filter out itineraries with bus legs that have no actual departure times
+  const itineraries = allItineraries.filter(
+    (itinerary): itinerary is PlanItinerary => {
+      if (!itinerary) return false;
+      
+      // Check if any bus leg has no departure time
+      const hasBusLegWithoutDeparture = itinerary.legs.some(
+        (leg) => leg.type === "bus" && !leg.departureTime
+      );
+      
+      // If we have a departureTime specified, we require bus legs to have departure times
+      // If no departureTime is specified, we allow estimated itineraries
+      if (departureTime && hasBusLegWithoutDeparture) {
+        return false;
+      }
+      
+      return true;
+    }
+  );
   
   const sortedItineraries = itineraries
     .sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes)

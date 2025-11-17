@@ -23,28 +23,33 @@ model User {
 }
 
 model Route {
-  id          String   @id @default(cuid())
-  name        String
-  number      String
-  origin      String
-  destination String
-  totalStops  Int
-  duration    Int
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  routeNumericId Int?     @unique // Original numeric ID from API (e.g., 18)
+  name           String
+  number         String
+  origin         String
+  destination    String
+  totalStops     Int
+  duration       Int
+  createdAt      DateTime @default(now())
 
   stops Stop[]
+
+  @@index([routeNumericId])
 }
 
 model Stop {
-  id        String @id @default(cuid())
-  name      String
-  latitude  Float
-  longitude Float
-  sequence  Int
-  routeId   String
-  route     Route  @relation(fields: [routeId], references: [id])
+  id             String @id @default(cuid())
+  stopNumericId  Int?   // Original numeric ID from API (e.g., 1807)
+  name           String
+  latitude       Float
+  longitude      Float
+  sequence       Int
+  routeId        String
+  route          Route  @relation(fields: [routeId], references: [id])
 
   @@index([routeId])
+  @@index([stopNumericId])
 }
 
 model SavedItem {

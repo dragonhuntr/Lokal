@@ -145,6 +145,7 @@ export function RoutesSidebar({
 }: RoutesSidebarProps) {
   const router = useRouter();
   const isDesktop = useMediaQuery("(min-width: 640px)");
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<SidebarView>("routes");
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
@@ -163,6 +164,11 @@ export function RoutesSidebar({
   const [authDefaultMode, setAuthDefaultMode] = useState<"signin" | "signup">("signin");
   const savedItems = useSavedItems();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Track when component has mounted to prevent hydration mismatches
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isDesktop) {
@@ -585,24 +591,26 @@ export function RoutesSidebar({
     [onSelectItinerary]
   );
 
+  // Desktop-specific header with Dialog components (only used inside Dialog.Content)
+  const desktopHeader = (
+    <div className="mb-3 flex items-center justify-between">
+      <Dialog.Title className="flex items-center">
+        <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
+      </Dialog.Title>
+      <Dialog.Close asChild>
+        <button
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-transparent text-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+          aria-label="Close sidebar"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </Dialog.Close>
+    </div>
+  );
+
+  // Shared content (used in both desktop Dialog and mobile bottom sheet)
   const sidebarContent = (
     <>
-      {isDesktop && (
-        <div className="mb-3 flex items-center justify-between">
-          <Dialog.Title className="flex items-center">
-            <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
-          </Dialog.Title>
-          <Dialog.Close asChild>
-            <button
-              className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-transparent text-foreground transition hover:bg-muted focus:outline-2 focus:outline-offset-2 focus:outline-ring"
-              aria-label="Close sidebar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </Dialog.Close>
-        </div>
-      )}
-
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Mode Toggle */}
               <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg bg-muted/40 p-1" role="tablist" aria-label="Application mode">
@@ -939,44 +947,47 @@ export function RoutesSidebar({
   return (
     <>
       {/* Desktop: Use Dialog */}
-      <div
-        className={cn(
-          "pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4",
-          "sm:absolute sm:inset-auto sm:left-4 sm:top-4 sm:bottom-auto sm:right-auto sm:px-0 sm:justify-start",
-          isDesktop ? "block" : "hidden"
-        )}
-      >
-        <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Trigger asChild>
-            <button
-              className="pointer-events-auto inline-flex h-11 w-auto items-center justify-center gap-2 rounded-md bg-white/90 px-3 py-0 text-sm font-medium text-foreground shadow-md transition hover:bg-white focus:outline-2 focus:outline-offset-2 focus:outline-ring"
-              aria-label="Toggle sidebar"
-            >
-              <Menu className="h-4 w-4" />
-              <span>Explore</span>
-            </button>
-          </Dialog.Trigger>
-          <Dialog.Portal>
-            <Dialog.Content
-              className={cn(
-                "pointer-events-auto fixed inset-auto left-4 top-4 bottom-4 z-50 flex h-[calc(100vh-2rem)] w-auto min-w-[340px] max-w-[420px] flex-col overflow-hidden rounded-xl border bg-background p-3 shadow-xl focus:outline-none md:max-w-[600px]"
-              )}
-            >
-              {sidebarContent}
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-      </div>
+      {mounted && isDesktop && (
+        <div
+          className={cn(
+            "pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4",
+            "sm:absolute sm:inset-auto sm:left-4 sm:top-4 sm:bottom-auto sm:right-auto sm:px-0 sm:justify-start"
+          )}
+        >
+          <Dialog.Root open={open} onOpenChange={setOpen}>
+            <Dialog.Trigger asChild>
+              <button
+                className="pointer-events-auto inline-flex h-11 w-auto items-center justify-center gap-2 rounded-md bg-white/90 px-3 py-0 text-sm font-medium text-foreground shadow-md transition hover:bg-white focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+                aria-label="Toggle sidebar"
+              >
+                <Menu className="h-4 w-4" />
+                <span>Explore</span>
+              </button>
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Content
+                className={cn(
+                  "pointer-events-auto fixed inset-auto left-4 top-4 bottom-4 z-50 flex h-[calc(100vh-2rem)] w-auto min-w-[340px] max-w-[420px] flex-col overflow-hidden rounded-xl border bg-background p-3 shadow-xl focus:outline-none md:max-w-[600px]"
+                )}
+              >
+                {desktopHeader}
+                {sidebarContent}
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+        </div>
+      )}
 
       {/* Mobile: Logo positioned at top-left */}
-      {!isDesktop && (
+      {mounted && !isDesktop && (
         <div className="fixed left-4 top-4 z-50 pointer-events-none">
           <img src="/logo.png" alt="Lokal" className="h-12 w-12" />
         </div>
       )}
 
       {/* Mobile: Use Framer Motion Bottom Sheet */}
-      {!isDesktop && (
+      {mounted && (
+        <div className={cn(!isDesktop ? "block" : "hidden")}>
         <motion.div
           className="fixed inset-x-0 bottom-0 z-50 flex w-full flex-col overflow-hidden rounded-t-3xl border-t border-l border-r bg-background shadow-xl"
           style={{
@@ -1004,6 +1015,7 @@ export function RoutesSidebar({
             {sidebarContent}
           </div>
         </motion.div>
+        </div>
       )}
 
       <AuthDialog open={authOpen} onOpenChange={setAuthOpen} defaultMode={authDefaultMode} />

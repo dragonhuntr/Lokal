@@ -105,6 +105,7 @@ async function seedRoutesAndStops() {
       await prisma.route.create({
         data: {
           id: buildRouteId(route.RouteId),
+          routeNumericId: route.RouteId,
           name: route.LongName || route.ShortName || `Route ${route.RouteId}`,
           number: route.ShortName || String(route.RouteId),
           origin,
@@ -114,6 +115,7 @@ async function seedRoutesAndStops() {
           stops: {
             create: stops.map((stop, index) => ({
               id: buildStopId(route.RouteId, stop.stopId, index),
+              stopNumericId: stop.stopId,
               name: stop.name,
               latitude: stop.lat,
               longitude: stop.lon,
