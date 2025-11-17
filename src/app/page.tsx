@@ -687,6 +687,7 @@ export default function Home() {
         savedJourneyOrigin={viewingSavedJourney ? savedJourneyOrigin : null}
         savedJourneyDestination={viewingSavedJourney ? savedJourneyDestination : null}
         isItineraryLocked={isItineraryLocked}
+        viewingSavedJourney={viewingSavedJourney}
       />
       </main>
     </>
