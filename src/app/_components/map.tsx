@@ -24,6 +24,7 @@ interface MapboxMapProps {
   savedJourneyOrigin?: { latitude: number; longitude: number } | null;
   savedJourneyDestination?: { latitude: number; longitude: number } | null;
   isItineraryLocked?: boolean;
+  viewingSavedJourney?: boolean;
 }
 
 interface NavigationRouteGeoJSON {
@@ -93,6 +94,7 @@ export function MapboxMap({
   savedJourneyOrigin,
   savedJourneyDestination,
   isItineraryLocked = false,
+  viewingSavedJourney = false,
 }: MapboxMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -836,8 +838,8 @@ export function MapboxMap({
           </Source>
         )}
 
-        {/* Render bus stops for the selected itinerary - only when locked */}
-        {!selectedRoute && isItineraryLocked && selectedItinerary?.legs?.map((leg, legIndex) => {
+        {/* Render bus stops for the selected itinerary - only when locked or viewing saved journey */}
+        {!selectedRoute && (isItineraryLocked || viewingSavedJourney) && selectedItinerary?.legs?.map((leg, legIndex) => {
           if (leg.type !== "bus" || !leg.path?.length) return null;
 
           return leg.path.map((stop, stopIndex) => {
