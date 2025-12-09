@@ -350,14 +350,14 @@ export function RoutesSidebar({
 
   useEffect(() => {
     if (itineraries && itineraries.length > 0 && planStatus === "success") {
-      // If viewing a saved journey, skip route-options and go directly to step-by-step
-      if (viewingSavedJourney) {
+      // If viewing a saved journey or itinerary is locked, show step-by-step
+      if (viewingSavedJourney || isItineraryLocked) {
         setView("step-by-step");
       } else {
         setView("route-options");
       }
     }
-  }, [itineraries, planStatus, viewingSavedJourney]);
+  }, [itineraries, planStatus, viewingSavedJourney, isItineraryLocked]);
 
   useEffect(() => {
     if (mode === "explore") {

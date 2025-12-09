@@ -7,6 +7,7 @@ import {
   fetchAllStops,
   fetchRouteKML,
   fetchAllVehicles,
+  getStopETAs,
 } from "@/server/bus-api";
 import {
   getScheduledDepartures,
@@ -118,5 +119,12 @@ export const busRouter = createTRPCRouter({
     .input(z.object({ tripId: z.string() }))
     .query(async ({ input }) => {
       return await getTripSchedule(input.tripId);
+    }),
+
+  // Get all ETAs for a stop up to 6 hours from now
+  getStopETAs: publicProcedure
+    .input(z.object({ stopId: z.number() }))
+    .query(async ({ input }) => {
+      return await getStopETAs(input.stopId);
     }),
 });

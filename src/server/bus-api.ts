@@ -4,6 +4,8 @@ import { db } from "@/server/db";
 import { generateFakeBuses, shouldUseFakeBuses } from "@/server/dev-bus-data";
 import { getCached, getCachedWithJitter, getCachedBatch } from "@/lib/redis";
 import { CACHE_KEYS, CACHE_TTL } from "@/lib/cache-keys";
+import { getScheduledDepartures } from "@/server/gtfs-schedule";
+import { parseGTFSTime, gtfsTimeToDate } from "../../prisma/gtfs-parser";
 
 // Log dev mode status on module load
 if (shouldUseFakeBuses()) {
@@ -637,6 +639,112 @@ export const fetchAllVehicles = async (): Promise<RouteDetails["Vehicles"]> => {
     return [];
   }
 };
+
+/**
+ * ETA information for a stop
+ */
+export interface StopETA {
+  routeId: string;
+  routeName: string;
+  routeNumber: string;
+  headsign: string;
+  eta: Date;
+  dataSource: "realtime" | "scheduled";
+}
+
+/**
+ * Get all ETAs for a stop up to 6 hours from now
+ * Combines real-time departures and scheduled departures
+ */
+export async function getStopETAs(stopId: number): Promise<StopETA[]> {
+  const now = new Date();
+  const sixHoursFromNow = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+  
+  const etas: StopETA[] = [];
+
+  try {
+    // Get real-time departures
+    const realtimeDepartures = await fetchStopDepartures(stopId);
+    
+    for (const stopInfo of realtimeDepartures) {
+      for (const routeDirection of stopInfo.RouteDirections) {
+        for (const departure of routeDirection.Departures) {
+          // Skip completed departures
+          if (departure.IsCompleted) continue;
+          
+          // Parse ETA
+          const etaDate = departure.ETALocalTime 
+            ? new Date(departure.ETALocalTime)
+            : departure.ETA 
+              ? new Date(departure.ETA)
+              : null;
+          
+          if (!etaDate || isNaN(etaDate.getTime())) continue;
+          
+          // Filter to 6 hours
+          if (etaDate > sixHoursFromNow) continue;
+          
+          etas.push({
+            routeId: routeDirection.RouteId,
+            routeName: departure.Trip.InternetServiceDesc || routeDirection.RouteId,
+            routeNumber: routeDirection.RouteId,
+            headsign: departure.Trip.InternetServiceDesc || departure.Trip.InternalSignDesc || "Unknown",
+            eta: etaDate,
+            dataSource: "realtime",
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error fetching real-time departures for stop ${stopId}:`, error);
+  }
+
+  try {
+    // Get scheduled departures from GTFS
+    // StopId from bus API should match stopNumericId in GTFS
+    const scheduledDepartures = await getScheduledDepartures(
+      stopId,
+      now,
+      undefined,
+      100 // Get more to account for filtering
+    );
+
+    for (const scheduled of scheduledDepartures) {
+      // Convert GTFS time to Date
+      const departureDate = gtfsTimeToDate(scheduled.departureTime, now);
+      
+      // Filter to 6 hours
+      if (departureDate > sixHoursFromNow) continue;
+      
+      // Skip if we already have a real-time departure for this route/time (within 2 minutes)
+      // Compare by route number since routeId formats differ between real-time and scheduled
+      const hasRealtime = etas.some(
+        (eta) =>
+          eta.routeNumber === scheduled.routeNumber &&
+          Math.abs(eta.eta.getTime() - departureDate.getTime()) < 2 * 60 * 1000 &&
+          eta.dataSource === "realtime"
+      );
+      
+      if (hasRealtime) continue;
+      
+      etas.push({
+        routeId: scheduled.routeId,
+        routeName: scheduled.routeName,
+        routeNumber: scheduled.routeNumber,
+        headsign: scheduled.headsign,
+        eta: departureDate,
+        dataSource: "scheduled",
+      });
+    }
+  } catch (error) {
+    console.error(`Error fetching scheduled departures for stop ${stopId}:`, error);
+  }
+
+  // Sort by ETA time
+  etas.sort((a, b) => a.eta.getTime() - b.eta.getTime());
+
+  return etas;
+}
 
 // Re-export utility functions for backward compatibility
 export { getOccupancyLabel, getOccupancyColor } from "@/lib/bus-utils";

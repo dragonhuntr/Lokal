@@ -13,15 +13,31 @@ export interface ProfileDialogProps {
 export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
   const { user, refetch } = useSession();
   const [name, setName] = useState("");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     setName(user.name ?? "");
-    setNotificationsEnabled(user.notificationsEnabled);
+    // Check actual permission state, not just user preference
+    if ("Notification" in window) {
+      setNotificationsEnabled(Notification.permission === "granted");
+    }
   }, [user]);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").then(
+        (registration) => {
+          console.log("Service Worker registration successful with scope: ", registration.scope);
+        },
+        (err) => {
+          console.log("Service Worker registration failed: ", err);
+        }
+      );
+    }
+  }, []);
 
   const handleSave = async () => {
     if (!user) return;
@@ -37,15 +53,11 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
         });
         if (!res.ok) throw new Error("Failed to update profile");
       }
-      if (user.notificationsEnabled !== notificationsEnabled) {
-        const res = await fetch(`/api/user/${encodeURIComponent(user.id)}/preferences`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ notificationsEnabled }),
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error("Failed to update preferences");
-      }
+
+      // We don't sync notification preference to backend here anymore as it's browser permission based
+      // But if we wanted to store "user wants notifications" we could. 
+      // For now, we just rely on browser permission.
+
       await refetch();
       onOpenChange(false);
     } catch (err) {
@@ -55,11 +67,75 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
     }
   };
 
+  const toggleNotifications = async (checked: boolean) => {
+    if (checked) {
+      if (!("Notification" in window)) {
+        setError("This browser does not support desktop notification");
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      setNotificationsEnabled(permission === "granted");
+
+      if (permission === "granted") {
+        // Optionally sync to backend that user enabled notifications
+        if (user) {
+          await fetch(`/api/user/${encodeURIComponent(user.id)}/preferences`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ notificationsEnabled: true }),
+            credentials: "include",
+          });
+        }
+      }
+    } else {
+      // We can't programmatically revoke permission, but we can update state/backend
+      setNotificationsEnabled(false);
+      if (user) {
+        await fetch(`/api/user/${encodeURIComponent(user.id)}/preferences`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ notificationsEnabled: false }),
+          credentials: "include",
+        });
+      }
+    }
+  };
+
+  const sendTestNotification = () => {
+    setTimeout(() => {
+      if (Notification.permission === "granted") {
+        navigator.serviceWorker.ready.then((registration) => {
+          registration.showNotification("Test Notification", {
+            body: "This is a test notification from Lokal",
+            icon: "/logo.png",
+          });
+        });
+      } else {
+        setError("Please enable notifications first");
+      }
+    }, 3000);
+  };
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-[9999] bg-black/40" />
+        <Dialog.Content
+          className="pointer-events-auto fixed left-1/2 top-1/2 z-[9999] w-[calc(100vw-2rem)] max-w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-xl"
+          onInteractOutside={(e) => {
+            e.preventDefault();
+          }}
+          onPointerDownOutside={(e) => {
+            e.preventDefault();
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
           <div className="mb-3 flex items-center justify-between">
             <Dialog.Title className="text-base font-semibold">Your profile</Dialog.Title>
             <Dialog.Close asChild>
@@ -80,15 +156,25 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
               />
             </div>
 
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={notificationsEnabled}
-                onChange={(e) => setNotificationsEnabled(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Receive notifications
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={notificationsEnabled}
+                  onChange={(e) => toggleNotifications(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Receive notifications
+              </label>
+
+              <button
+                onClick={sendTestNotification}
+                className="text-xs text-blue-500 hover:underline"
+                type="button"
+              >
+                Test (3s delay)
+              </button>
+            </div>
 
             {error && <div className="text-xs text-red-600">{error}</div>}
 

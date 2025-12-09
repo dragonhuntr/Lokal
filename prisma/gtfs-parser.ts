@@ -159,6 +159,30 @@ export function gtfsTimeToMinutes(timeStr: string): number {
 }
 
 /**
+ * Convert GTFS time string to a Date object
+ * Handles GTFS times > 24 hours (e.g., "25:30:00" = next day 1:30 AM)
+ * GTFS times are in the transit agency's local timezone, not UTC
+ * @param gtfsTime GTFS time string (e.g., "14:30:00" or "25:30:00")
+ * @param baseDate Base date to apply the time to (should be normalized to local midnight)
+ * @returns Date object with the GTFS time applied in local timezone
+ */
+export function gtfsTimeToDate(gtfsTime: string, baseDate: Date): Date {
+  const { hours, minutes, seconds } = parseGTFSTime(gtfsTime);
+  const date = new Date(baseDate);
+
+  // Handle times >= 24 hours (next day)
+  // Use local timezone methods since GTFS times are in local time
+  if (hours >= 24) {
+    date.setHours(hours - 24, minutes, seconds || 0, 0);
+    date.setDate(date.getDate() + 1);
+  } else {
+    date.setHours(hours, minutes, seconds || 0, 0);
+  }
+
+  return date;
+}
+
+/**
  * Parse GTFS date format (YYYYMMDD)
  */
 export function parseGTFSDate(dateStr: string): Date {

@@ -155,13 +155,7 @@
   }
 }
 
-/* Hide Next.js error overlay in development
+/* Hide Next.js dev tools portal */
 nextjs-portal {
   display: none !important;
 }
-
-body {
-  padding: 0 !important;
-  overflow: auto !important;
-}
- */

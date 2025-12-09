@@ -8,10 +8,10 @@ import { env } from "@/env";
 import { api } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/react";
 import type { LocationSearchResult } from "./routes-sidebar";
-import { BusInfoPopup } from "./bus-info-popup";
 import type { RouteDetails } from "@/server/bus-api";
 import type { PlanItinerary } from "@/server/routing/service";
 import { haversineDistance } from "@/utils/geo";
+import { getOccupancyLabel, getOccupancyColor } from "@/lib/bus-utils";
 
 type RouteSummary = RouterOutputs["bus"]["getRoutes"][number];
 
@@ -72,6 +72,129 @@ const ITINERARY_SOURCE_ID = "itinerary-route";
 const ITINERARY_WALK_LAYER_ID = "itinerary-walk-layer";
 const ITINERARY_BUS_LAYER_ID = "itinerary-bus-layer";
 
+interface StopMarkerProps {
+  stop: RouteDetails["Stops"][number];
+  isFirst: boolean;
+  isLast: boolean;
+  routeColor: string;
+  onHover: () => void;
+  onUnhover: () => void;
+  isHovered: boolean;
+}
+
+function StopMarker({
+  stop,
+  isFirst,
+  isLast,
+  routeColor,
+  onHover,
+  onUnhover,
+  isHovered,
+}: StopMarkerProps) {
+  const { data: stopETAs } = api.bus.getStopETAs.useQuery(
+    { stopId: stop.StopId },
+    {
+      enabled: isHovered,
+      staleTime: 30_000, // 30 seconds
+    }
+  );
+
+  const formatETA = (eta: Date | string): string => {
+    const etaDate = typeof eta === "string" ? new Date(eta) : eta;
+    const now = new Date();
+    const diffMinutes = Math.round((etaDate.getTime() - now.getTime()) / 60000);
+
+    if (diffMinutes <= 0) return "Now";
+    if (diffMinutes === 1) return "1 min";
+    if (diffMinutes < 60) return `${diffMinutes} mins`;
+
+    // For times more than an hour away, show the actual time
+    return etaDate.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <Marker
+      key={stop.StopId}
+      latitude={stop.Latitude}
+      longitude={stop.Longitude}
+      anchor="center"
+    >
+      <div
+        className="group relative flex items-center justify-center"
+        onMouseEnter={onHover}
+        onMouseLeave={onUnhover}
+      >
+        {/* Stop marker with different styles for first/last stops */}
+        <div className="flex items-center justify-center">
+          <span
+            className={`inline-block rounded-full border-2 border-white shadow-lg transition-all hover:scale-125 ${
+              isFirst || isLast ? "h-5 w-5" : "h-3 w-3"
+            }`}
+            style={{
+              backgroundColor: routeColor,
+            }}
+            title={stop.Name}
+          />
+        </div>
+
+        {/* Tooltip with stop name and ETAs - shows on hover */}
+        {isHovered && (
+          <div className="pointer-events-none absolute bottom-full mb-2 z-50 w-80 max-w-xs rounded-md bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+            <div className="font-semibold mb-1">{stop.Name}</div>
+            {stop.Description && (
+              <div className="text-[10px] text-gray-300 mb-2">{stop.Description}</div>
+            )}
+            
+            {/* ETAs List */}
+            {stopETAs && stopETAs.length > 0 ? (
+              <div className="mt-2 border-t border-gray-700 pt-2">
+                <div className="text-[10px] font-semibold text-gray-400 mb-1">Next Departures:</div>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {stopETAs.slice(0, 10).map((eta, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-[10px]"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${
+                            eta.dataSource === "realtime" ? "bg-green-400" : "bg-gray-400"
+                          }`}
+                          title={eta.dataSource === "realtime" ? "Real-time" : "Scheduled"}
+                        />
+                        <span className="font-medium">{eta.routeNumber}</span>
+                        <span className="text-gray-400 truncate max-w-[120px]">
+                          {eta.headsign}
+                        </span>
+                      </div>
+                      <span className="font-semibold text-gray-200">{formatETA(eta.eta)}</span>
+                    </div>
+                  ))}
+                  {stopETAs.length > 10 && (
+                    <div className="text-[10px] text-gray-400 pt-1">
+                      +{stopETAs.length - 10} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : stopETAs === undefined ? (
+              <div className="mt-2 text-[10px] text-gray-400">Loading departures...</div>
+            ) : (
+              <div className="mt-2 text-[10px] text-gray-400">No departures scheduled</div>
+            )}
+            
+            {/* Arrow pointing down */}
+            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+          </div>
+        )}
+      </div>
+    </Marker>
+  );
+}
+
 // Helper function to calculate distance between two coordinates in meters
 function distanceBetweenMeters(
   a: { latitude: number; longitude: number },
@@ -99,9 +222,8 @@ export function MapboxMap({
   const [viewState, setViewState] = useState(DEFAULT_VIEW);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [navigationRoute, setNavigationRoute] = useState<NavigationRouteGeoJSON | null>(null);
-  const [selectedVehicle, setSelectedVehicle] = useState<RouteDetails["Vehicles"][number] | null>(
-    null
-  );
+  const [hoveredStopId, setHoveredStopId] = useState<number | null>(null);
+  const [hoveredVehicleId, setHoveredVehicleId] = useState<number | null>(null);
   const directionsRequestIdRef = useRef(0);
   const hasCenteredUserRef = useRef(false);
   const lastCenteredLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
@@ -713,12 +835,38 @@ export function MapboxMap({
     }
   }, [mapLoaded, itineraryDirections]);
 
+  const formatSpeed = (speed: number) => {
+    return `${Math.round(speed)} km/h`;
+  };
+
+  const formatLastUpdated = (lastUpdated: string) => {
+    try {
+      // Handle /Date(1762969896000-0500)/ format for legacy .NET date strings
+      const match = lastUpdated.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
+      if (match) {
+        // Unix ms timestamp (ignore the timezone/group 2)
+        const date = new Date(Number(match[1]));
+        const now = new Date();
+        const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+        if (diffSeconds < 60) return "Just now";
+        if (diffSeconds < 120) return "1 min ago";
+        if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} mins ago`;
+
+        return date.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+      } else {
+        return "Invalid date";
+      }
+    } catch {
+      return "Unknown";
+    }
+  };
+
   return (
     <div className="relative h-screen w-full">
-      {selectedVehicle && (
-        <BusInfoPopup vehicle={selectedVehicle} onClose={() => setSelectedVehicle(null)} />
-      )}
-
       <Map
         ref={mapRef}
         {...viewState}
@@ -742,82 +890,126 @@ export function MapboxMap({
             const isLast = index === (routeDetails.Stops?.length ?? 0) - 1;
             
             return (
-              <Marker
+              <StopMarker
                 key={stop.StopId}
-                latitude={stop.Latitude}
-                longitude={stop.Longitude}
-                anchor="center"
-              >
-                <div className="group relative flex items-center justify-center">
-                  {/* Stop marker with different styles for first/last stops */}
-                  <div className="flex items-center justify-center">
-                    <span
-                      className={`inline-block rounded-full border-2 border-white shadow-lg transition-all hover:scale-125 ${
-                        isFirst || isLast
-                          ? "h-5 w-5"
-                          : "h-3 w-3"
-                      }`}
-                      style={{
-                        backgroundColor: routeColor,
-                      }}
-                      title={stop.Name}
-                    />
-                  </div>
-
-                  {/* Tooltip with stop name - shows on hover */}
-                  <div className="pointer-events-none absolute bottom-full mb-2 hidden w-max max-w-xs rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
-                    <div className="font-semibold">{stop.Name}</div>
-                    {stop.Description && (
-                      <div className="text-[10px] text-gray-300">{stop.Description}</div>
-                    )}
-                    {/* Arrow pointing down */}
-                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
-                  </div>
-                </div>
-              </Marker>
+                stop={stop}
+                isFirst={isFirst}
+                isLast={isLast}
+                routeColor={routeColor}
+                onHover={() => setHoveredStopId(stop.StopId)}
+                onUnhover={() => setHoveredStopId(null)}
+                isHovered={hoveredStopId === stop.StopId}
+              />
             );
           })}
 
         {/* Render buses as simple SVG markers - rendered after stops so they appear on top */}
         {selectedRoute &&
-          routeDetails?.Vehicles?.map((vehicle) => (
-            <Marker
-              key={vehicle.VehicleId}
-              latitude={vehicle.Latitude}
-              longitude={vehicle.Longitude}
-              anchor="center"
-            >
-              <div
-                onClick={() => setSelectedVehicle(vehicle)}
-                className="cursor-pointer transition-transform hover:scale-125"
-                style={{
-                  transform: `rotate(${vehicle.Heading ?? 0}deg)`,
-                }}
+          routeDetails?.Vehicles?.map((vehicle) => {
+            const isHovered = hoveredVehicleId === vehicle.VehicleId;
+            return (
+              <Marker
+                key={vehicle.VehicleId}
+                latitude={vehicle.Latitude}
+                longitude={vehicle.Longitude}
+                anchor="center"
               >
-                <svg width="56" height="56" viewBox="0 0 40 40">
-                  {/* Bus body */}
-                  <rect
-                    x="10"
-                    y="12"
-                    width="20"
-                    height="16"
-                    rx="2"
-                    fill={routeColor}
-                    stroke="#fff"
-                    strokeWidth="2.5"
-                  />
-                  {/* Windows */}
-                  <rect x="12" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
-                  <rect x="22" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
-                  {/* Wheels */}
-                  <circle cx="15" cy="28" r="3.5" fill="#333" />
-                  <circle cx="25" cy="28" r="3.5" fill="#333" />
-                  {/* Direction indicator (front) */}
-                  <rect x="18" y="10" width="4" height="2.5" fill="#fff" />
-                </svg>
-              </div>
-            </Marker>
-          ))}
+                <div
+                  className="group relative flex items-center justify-center"
+                  onMouseEnter={() => setHoveredVehicleId(vehicle.VehicleId)}
+                  onMouseLeave={() => setHoveredVehicleId(null)}
+                >
+                  <div 
+                    className="cursor-pointer transition-transform hover:scale-125"
+                    style={{
+                      transform: `rotate(${vehicle.Heading ?? 0}deg)`,
+                    }}
+                  >
+                    <svg width="56" height="56" viewBox="0 0 40 40">
+                      {/* Bus body */}
+                      <rect
+                        x="10"
+                        y="12"
+                        width="20"
+                        height="16"
+                        rx="2"
+                        fill={routeColor}
+                        stroke="#fff"
+                        strokeWidth="2.5"
+                      />
+                      {/* Windows */}
+                      <rect x="12" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
+                      <rect x="22" y="15" width="6" height="5" rx="1" fill="#87ceeb" opacity="0.8" />
+                      {/* Wheels */}
+                      <circle cx="15" cy="28" r="3.5" fill="#333" />
+                      <circle cx="25" cy="28" r="3.5" fill="#333" />
+                      {/* Direction indicator (front) */}
+                      <rect x="18" y="10" width="4" height="2.5" fill="#fff" />
+                    </svg>
+                  </div>
+
+                  {/* Tooltip with bus information - shows on hover */}
+                  {isHovered && (
+                    <div className="pointer-events-none absolute bottom-full mb-2 z-50 w-80 max-w-xs rounded-md bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+                      <div className="font-semibold mb-1">{vehicle.Name}</div>
+                      <div className="text-[10px] text-gray-300 mb-2">Vehicle #{vehicle.VehicleId}</div>
+                      
+                      {vehicle.Destination && (
+                        <div className="mb-2">
+                          <div className="text-[10px] font-semibold text-gray-400 mb-0.5">Destination</div>
+                          <div className="text-[10px] text-gray-200">{vehicle.Destination}</div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        {vehicle.Direction && (
+                          <div>
+                            <div className="text-[10px] font-semibold text-gray-400 mb-0.5">Direction</div>
+                            <div className="text-[10px] text-gray-200">{vehicle.Direction}</div>
+                          </div>
+                        )}
+                        {vehicle.Speed !== undefined && (
+                          <div>
+                            <div className="text-[10px] font-semibold text-gray-400 mb-0.5">Speed</div>
+                            <div className="text-[10px] text-gray-200">{formatSpeed(vehicle.Speed)}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {vehicle.LastStop && (
+                        <div className="mb-2">
+                          <div className="text-[10px] font-semibold text-gray-400 mb-0.5">Last Stop</div>
+                          <div className="text-[10px] text-gray-200">{vehicle.LastStop}</div>
+                        </div>
+                      )}
+
+                      {vehicle.OccupancyStatusReportLabel && (
+                        <div className="mb-2">
+                          <div className="text-[10px] font-semibold text-gray-400 mb-0.5">Occupancy</div>
+                          <span
+                            className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${getOccupancyColor(
+                              vehicle.OccupancyStatusReportLabel,
+                            )}`}
+                          >
+                            {getOccupancyLabel(vehicle.OccupancyStatusReportLabel)}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="mt-2 border-t border-gray-700 pt-2">
+                        <div className="text-[10px] text-gray-400">
+                          Updated: {formatLastUpdated(vehicle.LastUpdated)}
+                        </div>
+                      </div>
+
+                      {/* Arrow pointing down */}
+                      <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                    </div>
+                  )}
+                </div>
+              </Marker>
+            );
+          })}
 
         {!selectedRoute && !selectedItinerary && navigationRoute && (
           <Source id={NAVIGATION_SOURCE_ID} type="geojson" data={navigationRoute}>
