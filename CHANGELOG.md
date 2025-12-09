@@ -2,6 +2,278 @@
 
 All notable changes to the Lokal transit app project.
 
+## [Unreleased] - 2025-01-XX
+
+### Added - Major Journey Planning Features
+
+#### 🚀 Progressive Web App (PWA) Support
+- **Added PWA manifest** (`public/manifest.json`):
+  - Standalone display mode for app-like experience
+  - Portrait-primary orientation
+  - Theme color and background color configuration
+  - Maskable icon support for Android
+  - **Impact**: Users can install Lokal as a native-like app on mobile devices
+
+- **Enhanced metadata** in `src/app/layout.tsx`:
+  - Apple Web App meta tags for iOS home screen
+  - Theme color configuration
+  - Apple touch icon support
+  - **Impact**: Better iOS integration and branding
+
+#### 🗺️ Multi-Stop Journey Planning
+- **Multi-stop journey support** in `src/server/routing/service.ts`:
+  - Sequential segment planning for multiple destinations
+  - Automatic route combination across segments
+  - Buffer time integration between stops
+  - Cumulative duration calculation
+  - **Impact**: Users can plan complex journeys with multiple stops in one trip
+
+- **Journey stops management** (`src/app/_components/journey-stops-list.tsx`):
+  - Visual stop list with letter indicators (A, B, C, etc.)
+  - Drag-and-drop reordering using `@dnd-kit`
+  - Buffer time configuration per stop (hours and minutes)
+  - Purpose/activity tracking for each stop
+  - Quick buffer presets (15min, 30min, 1hr, 2hr, 4hr)
+  - Segment duration display between stops
+  - Final destination highlighting
+  - **Impact**: Intuitive multi-stop journey building with flexible timing
+
+- **Database schema enhancements** (`prisma/schema.prisma`):
+  - `JourneyStop` model for multi-stop journeys
+  - Buffer time storage (`bufferMinutes`)
+  - Purpose/activity field
+  - Calculated arrival/departure times
+  - Sequence ordering for stop order
+  - **Impact**: Persistent multi-stop journey data with timing information
+
+#### ⏰ Departure Time Selection
+- **New DepartureTimePicker component** (`src/app/_components/departure-time-picker.tsx`):
+  - Toggle between "Leave now" and "Leave at specific time"
+  - DateTime picker with 5-minute rounding
+  - 7-day future planning window
+  - Data source indicator (realtime vs GTFS)
+  - Color-coded source labels
+  - **Impact**: Users can plan trips for future times, not just immediate departures
+
+- **Integration with routing service**:
+  - Departure time passed to itinerary planning
+  - GTFS schedule lookup for future trips
+  - Real-time API fallback for current trips
+  - **Impact**: Accurate trip planning for any departure time
+
+#### 🔄 Drag-and-Drop Stop Reordering
+- **Implemented with @dnd-kit** (`src/app/_components/journey-stops-list.tsx`):
+  - Touch-friendly drag handles
+  - Keyboard accessibility support
+  - Visual feedback during drag (opacity, shadow)
+  - Smooth animations with Framer Motion
+  - Auto-replanning after reorder
+  - **Impact**: Intuitive stop reordering without manual deletion/re-addition
+
+#### 📍 Enhanced Geolocation Handling
+- **Improved location request flow** (`src/app/page.tsx`):
+  - Auto-request location on first load
+  - Better error handling and user messaging
+  - Manual origin override support
+  - Location persistence across sessions
+  - **Impact**: Smoother onboarding and location-based features
+
+- **Onboarding integration** (`src/app/_components/onboarding-overlay.tsx`):
+  - Location permission request in tutorial
+  - Clear explanation of location benefits
+  - One-time display with localStorage
+  - **Impact**: Higher location permission grant rates
+
+#### 📱 Mobile Bottom Sheet Layout
+- **Framer Motion bottom sheet** (`src/app/_components/routes-sidebar.tsx`):
+  - Native-feeling drag gestures
+  - Spring animations
+  - Height adjustment (600px default)
+  - Drag handle indicator
+  - Smooth open/close transitions
+  - Desktop fallback to traditional sidebar
+  - **Impact**: Better mobile UX with native app feel
+
+#### 🔢 Numeric ID Support for GTFS Integration
+- **Database schema updates** (`prisma/schema.prisma`):
+  - `routeNumericId` field on Route model
+  - `stopNumericId` field on Stop model
+  - Indexes for performance
+  - Backward compatibility with string IDs
+  - **Impact**: Better GTFS data integration and query performance
+
+- **ID parsing utilities**:
+  - Automatic numeric ID extraction from string IDs
+  - Fallback handling for legacy data
+  - Type-safe ID conversion
+  - **Impact**: Seamless migration and compatibility
+
+#### 🔌 Data Source Orchestration
+- **DepartureOrchestrator** (`src/server/routing/data-sources/orchestrator.ts`):
+  - Automatic real-time → GTFS fallback
+  - Future trip detection (GTFS for trips >24hrs)
+  - Error handling with graceful degradation
+  - Source indicator in UI
+  - **Impact**: Reliable departure time information regardless of data availability
+
+- **GTFS schedule integration** (`src/server/gtfs-schedule.ts`):
+  - Scheduled departure lookup
+  - Date-based trip filtering
+  - Route-specific stop departures
+  - **Impact**: Accurate planning for future trips using schedule data
+
+#### 🎯 Enhanced Map Rendering
+- **ViewingSavedJourney prop** (`src/app/_components/map.tsx`):
+  - Special rendering mode for saved journeys
+  - Origin/destination highlighting
+  - Preserved view state
+  - **Impact**: Better visualization when viewing saved journeys
+
+#### 🔍 Route Search Enhancements
+- **Improved search functionality** (`src/app/_components/routes-sidebar.tsx`):
+  - Real-time search filtering
+  - Better result highlighting
+  - Search state management
+  - **Impact**: Faster route discovery
+
+#### 🔗 Public Journey Sharing
+- **Enhanced sharing features**:
+  - Public access to saved journeys via URL
+  - Shareable links with journey ID
+  - Destination name preservation
+  - **Impact**: Easy journey sharing without authentication
+
+### Changed - Architecture & Performance
+
+#### Journey Planning Algorithm
+- **Multi-segment planning** (`src/server/routing/service.ts`):
+  - Sequential destination processing
+  - Buffer time accumulation
+  - Segment combination with optimal route selection
+  - Time-aware planning with departure time support
+  - **Impact**: Accurate multi-stop journey calculations
+
+#### Time Calculation Utilities
+- **New utility functions** (`src/app/_components/utils/itinerary-times.ts`):
+  - `calculateMultiStopJourneyTimes()` for complex journeys
+  - Buffer time separation from travel time
+  - Stop-level time tracking
+  - **Impact**: Accurate time display for multi-stop journeys
+
+#### Component Organization
+- **Extracted JourneyStopsList component**:
+  - Reusable across different views
+  - Compact mode support
+  - Self-contained drag-and-drop logic
+  - **Impact**: Better code organization and reusability
+
+### Fixed - Bugs & Issues
+
+#### PWA Implementation
+- ✅ Fixed manifest.json configuration
+- ✅ Fixed iOS meta tags
+- ✅ Fixed icon paths and sizes
+- ✅ Fixed theme color application
+
+#### Journey Planning
+- ✅ Fixed buffer time calculation in multi-stop journeys
+- ✅ Fixed departure time preservation when adding stops
+- ✅ Fixed itinerary locking behavior
+- ✅ Fixed stop reordering triggering unnecessary replanning
+
+#### Mobile Experience
+- ✅ Fixed bottom sheet drag gestures
+- ✅ Fixed keyboard overlap on mobile inputs
+- ✅ Fixed touch target sizes
+- ✅ Fixed viewport height issues on mobile browsers
+
+#### Data Handling
+- ✅ Fixed numeric ID parsing edge cases
+- ✅ Fixed GTFS fallback timing
+- ✅ Fixed real-time API error handling
+- ✅ Fixed departure time timezone issues
+
+### Technical Debt Addressed
+
+#### Dependencies
+- Added `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` for drag-and-drop
+- Added `framer-motion` for animations
+- **Impact**: Modern, accessible drag-and-drop and smooth animations
+
+#### Code Quality
+- Consistent error handling patterns
+- Type-safe ID conversions
+- Proper null/undefined handling
+- **Impact**: More maintainable and reliable codebase
+
+### Files Created
+
+**New Components**:
+- `src/app/_components/departure-time-picker.tsx` - Departure time selection UI
+- `src/app/_components/journey-stops-list.tsx` - Multi-stop journey management
+
+**New Utilities**:
+- `src/app/_components/utils/itinerary-times.ts` - Time calculation helpers
+
+**New Data Sources**:
+- `src/server/routing/data-sources/orchestrator.ts` - Data source orchestration
+- `src/server/routing/data-sources/gtfs.ts` - GTFS schedule data source
+- `src/server/routing/data-sources/realtime.ts` - Real-time API data source
+
+**Configuration**:
+- `public/manifest.json` - PWA manifest
+
+### Files Modified
+
+**Core Journey Planning**:
+- `src/server/routing/service.ts` - Multi-stop planning, departure time support
+- `src/app/page.tsx` - Journey stop management, departure time handling
+- `src/app/_components/place-search.tsx` - Integration with journey stops
+- `src/app/_components/routes-sidebar.tsx` - Mobile bottom sheet, journey stops UI
+- `src/app/_components/map.tsx` - Saved journey viewing mode
+- `src/app/_components/directions-steps.tsx` - Multi-stop display support
+
+**Database**:
+- `prisma/schema.prisma` - JourneyStop model, numeric IDs
+- `prisma/migrations/` - Migration for numeric IDs and journey stops
+
+**Configuration**:
+- `src/app/layout.tsx` - PWA metadata
+- `package.json` - New dependencies
+
+### Summary Statistics
+
+**New Features**: 8 major features
+- PWA support
+- Multi-stop journey planning
+- Departure time selection
+- Drag-and-drop reordering
+- Buffer time management
+- Mobile bottom sheet
+- Numeric ID support
+- Data source orchestration
+
+**New Dependencies**: 4 packages
+- @dnd-kit libraries (3 packages)
+- framer-motion
+
+**Database Changes**: 2 migrations
+- Numeric IDs migration
+- Journey stops migration
+
+**Component Files**: 2 new, 6 modified
+- 2 new reusable components
+- 6 components enhanced with new features
+
+**User Experience Improvements**:
+- Native app feel with PWA
+- Intuitive multi-stop planning
+- Future trip planning capability
+- Smooth mobile interactions
+- Better location handling
+
+---
+
 ## [Unreleased] - 2025-01-12
 
 ### Added - Performance & UI/UX Improvements
