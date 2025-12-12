@@ -9,7 +9,7 @@ export const openApiDocument: OpenAPIV3.Document = {
     title: "Lokal Transit API",
     description:
       "HTTP API for Lokal.",
-    version: "0.1.0",
+    version: "0.2.0",
   },
   servers: [
     {
@@ -37,20 +37,16 @@ export const openApiDocument: OpenAPIV3.Document = {
       description: "Trip planning and transit network helpers.",
     },
     {
-      name: "Alerts",
-      description: "Service alerts subscription and management.",
-    },
-    {
       name: "Stops",
-      description: "Transit stop metadata and management endpoints.",
-    },
-    {
-      name: "Trips",
-      description: "Planned journeys and commuting preferences.",
+      description: "Transit stop metadata and departure information.",
     },
     {
       name: "Users",
       description: "User profile and personalization endpoints.",
+    },
+    {
+      name: "Journeys",
+      description: "Saved journey retrieval endpoints.",
     },
   ],
   paths: {
@@ -335,7 +331,7 @@ export const openApiDocument: OpenAPIV3.Document = {
                   value: {
                     origin: { latitude: 14.5995, longitude: 120.9842 },
                     destinations: [
-                      { latitude: 14.5821, longitude: 121.0123 },
+                      { latitude: 14.5821, longitude: 121.0123, bufferMinutes: 15, purpose: "Meeting" },
                       { latitude: 14.5764, longitude: 121.0851 },
                     ],
                     limit: 3,
@@ -383,7 +379,7 @@ export const openApiDocument: OpenAPIV3.Document = {
         tags: ["Routing"],
         summary: "List available routes",
         description:
-          "Fetches the transit routes stored in the system, including ordered stop information.",
+          "Fetches the transit routes stored in the system, including ordered stop information. Results are cached for 5 minutes.",
         responses: {
           "200": {
             description: "Routes returned successfully.",
@@ -404,10 +400,52 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
+    "/api/routes/{id}": {
+      get: {
+        tags: ["Routing"],
+        summary: "Get route by ID",
+        description: "Returns a specific transit route including its ordered stops. Results are cached for 5 minutes.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Unique identifier of the route.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Route returned successfully.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RouteDetailResponse" },
+              },
+            },
+          },
+          "404": {
+            description: "Route not found.",
+            content: {
+              "application/json": {
+                schema: { $ref: errorReference },
+              },
+            },
+          },
+          "500": {
+            description: "Unexpected error while loading the route.",
+            content: {
+              "application/json": {
+                schema: { $ref: errorReference },
+              },
+            },
+          },
+        },
+      },
+    },
     "/api/routes/{id}/bus": {
       get: {
         tags: ["Routing"],
-        summary: "Get route details",
+        summary: "Get route bus info",
         description:
           "Returns a specific transit route including its ordered stops.",
         parameters: [
@@ -428,30 +466,56 @@ export const openApiDocument: OpenAPIV3.Document = {
               },
             },
           },
-          "400": {
-            description: "Missing route identifier.",
-            content: {
-              "application/json": {
-                schema: { $ref: errorReference },
-                examples: {
-                  missing: { value: { error: "Route id is required" } },
-                },
-              },
-            },
-          },
           "404": {
             description: "Route not found.",
             content: {
               "application/json": {
                 schema: { $ref: errorReference },
-                examples: {
-                  notFound: { value: { error: "Route 123 not found" } },
-                },
               },
             },
           },
-          "500": {
-            description: "Unexpected error while loading the route.",
+        },
+      },
+    },
+    "/api/routes/{id}/schedule": {
+      get: {
+        tags: ["Routing"],
+        summary: "Get route schedule",
+        description: "Returns the schedule for a specific route including trips and stop times. Results are cached for 5 minutes.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Unique identifier of the route.",
+          },
+          {
+            name: "directionId",
+            in: "query",
+            required: false,
+            schema: { type: "integer", enum: [0, 1] },
+            description: "Filter trips by direction (0 or 1).",
+          },
+          {
+            name: "date",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+            description: "Date for the schedule in YYYY-MM-DD format. Defaults to today.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Schedule returned successfully.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ScheduleResponse" },
+              },
+            },
+          },
+          "404": {
+            description: "Route not found.",
             content: {
               "application/json": {
                 schema: { $ref: errorReference },
@@ -464,122 +528,53 @@ export const openApiDocument: OpenAPIV3.Document = {
     "/api/routes/schedule": {
       get: {
         tags: ["Routing"],
-        summary: "Get schedule overview",
-        description: "Endpoint stub for publishing route schedule data.",
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/bus/{id}": {
-      get: {
-        tags: ["Routing"],
-        summary: "Get bus details",
-        description: "Endpoint stub for per-bus service information.",
+        summary: "Get schedule by query",
+        description: "Returns the schedule for a route specified by query parameter. Results are cached for 5 minutes.",
         parameters: [
           {
-            name: "id",
-            in: "path",
+            name: "routeId",
+            in: "query",
             required: true,
             schema: { type: "string" },
-            description: "Unique bus identifier.",
+            description: "Unique identifier of the route.",
+          },
+          {
+            name: "directionId",
+            in: "query",
+            required: false,
+            schema: { type: "integer", enum: [0, 1] },
+            description: "Filter trips by direction (0 or 1).",
+          },
+          {
+            name: "date",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+            description: "Date for the schedule in YYYY-MM-DD format. Defaults to today.",
           },
         ],
         responses: {
-          "501": {
-            description: "Not implemented.",
+          "200": {
+            description: "Schedule returned successfully.",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+                schema: { $ref: "#/components/schemas/ScheduleResponse" },
               },
             },
           },
-        },
-      },
-    },
-    "/api/alerts": {
-      get: {
-        tags: ["Alerts"],
-        summary: "List service alerts",
-        description: "Endpoint stub for listing current alerts.",
-        responses: {
-          "501": {
-            description: "Not implemented.",
+          "400": {
+            description: "Missing routeId parameter.",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+                schema: { $ref: errorReference },
               },
             },
           },
-        },
-      },
-      post: {
-        tags: ["Alerts"],
-        summary: "Create an alert",
-        description: "Endpoint stub for creating service alerts.",
-        responses: {
-          "501": {
-            description: "Not implemented.",
+          "404": {
+            description: "Route not found.",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/alerts/{id}": {
-      get: {
-        tags: ["Alerts"],
-        summary: "Get alert details",
-        description: "Endpoint stub for retrieving a specific alert.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Alert identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-      delete: {
-        tags: ["Alerts"],
-        summary: "Delete an alert",
-        description: "Endpoint stub for deleting a saved alert.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Alert identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+                schema: { $ref: errorReference },
               },
             },
           },
@@ -590,13 +585,44 @@ export const openApiDocument: OpenAPIV3.Document = {
       get: {
         tags: ["Stops"],
         summary: "List stops",
-        description: "Endpoint stub for listing all stops.",
+        description: "Returns a paginated list of transit stops. Supports search filtering. Results are cached for 5 minutes.",
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 500, default: 100 },
+            description: "Maximum number of stops to return (max 500).",
+          },
+          {
+            name: "offset",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 0, default: 0 },
+            description: "Number of stops to skip for pagination.",
+          },
+          {
+            name: "search",
+            in: "query",
+            required: false,
+            schema: { type: "string" },
+            description: "Search term to filter stops by name.",
+          },
+        ],
         responses: {
-          "501": {
-            description: "Not implemented.",
+          "200": {
+            description: "Stops returned successfully.",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+                schema: { $ref: "#/components/schemas/StopsListResponse" },
+              },
+            },
+          },
+          "500": {
+            description: "Unexpected error while loading stops.",
+            content: {
+              "application/json": {
+                schema: { $ref: errorReference },
               },
             },
           },
@@ -607,7 +633,7 @@ export const openApiDocument: OpenAPIV3.Document = {
       get: {
         tags: ["Stops"],
         summary: "Get stop details",
-        description: "Endpoint stub for retrieving stop information.",
+        description: "Returns detailed information about a stop including upcoming departures. Results are cached for 1 minute.",
         parameters: [
           {
             name: "id",
@@ -616,13 +642,28 @@ export const openApiDocument: OpenAPIV3.Document = {
             schema: { type: "string" },
             description: "Stop identifier.",
           },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+            description: "Maximum number of upcoming departures to return (max 50).",
+          },
         ],
         responses: {
-          "501": {
-            description: "Not implemented.",
+          "200": {
+            description: "Stop details returned successfully.",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+                schema: { $ref: "#/components/schemas/StopDetailResponse" },
+              },
+            },
+          },
+          "404": {
+            description: "Stop not found.",
+            content: {
+              "application/json": {
+                schema: { $ref: errorReference },
               },
             },
           },
@@ -639,121 +680,6 @@ export const openApiDocument: OpenAPIV3.Document = {
             required: true,
             schema: { type: "string" },
             description: "Stop identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/trip": {
-      get: {
-        tags: ["Trips"],
-        summary: "List trips",
-        description: "Endpoint stub for listing planned trips for a user.",
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/trip/{id}": {
-      get: {
-        tags: ["Trips"],
-        summary: "Get trip details",
-        description: "Endpoint stub for retrieving a specific trip.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Trip identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-      post: {
-        tags: ["Trips"],
-        summary: "Create a trip occurrence",
-        description: "Endpoint stub for creating trip occurrences or actions.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Trip identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-      put: {
-        tags: ["Trips"],
-        summary: "Update a trip",
-        description: "Endpoint stub for updating trip details.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Trip identifier.",
-          },
-        ],
-        responses: {
-          "501": {
-            description: "Not implemented.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
-              },
-            },
-          },
-        },
-      },
-      delete: {
-        tags: ["Trips"],
-        summary: "Delete a trip",
-        description: "Endpoint stub for deleting a trip.",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "Trip identifier.",
           },
         ],
         responses: {
@@ -825,46 +751,182 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
-    "/api/user/{id}/saved-routes": {
+    "/api/user/{id}/saved-items": {
       get: {
         tags: ["Users"],
-        summary: "List saved routes",
-        description: "Returns routes the user has saved.",
+        summary: "List saved items",
+        description: "Returns all saved items (routes and journeys) for the user.",
         security: [{ CookieAuth: [] }],
-        parameters: [ { name: "id", in: "path", required: true, schema: { type: "string" } } ],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
+        ],
         responses: {
-          "200": { description: "Saved routes returned.", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedRoutesResponse" } } } },
+          "200": {
+            description: "Saved items returned.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/SavedItemsResponse" },
+              },
+            },
+          },
           "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
         },
       },
       post: {
         tags: ["Users"],
-        summary: "Save a route",
-        description: "Saves a transit route for the user.",
+        summary: "Save an item",
+        description: "Saves a route or journey for the user.",
         security: [{ CookieAuth: [] }],
-        parameters: [ { name: "id", in: "path", required: true, schema: { type: "string" } } ],
-        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/SaveRouteRequest" } } } },
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SaveItemRequest" },
+              examples: {
+                saveRoute: {
+                  summary: "Save a route",
+                  value: {
+                    type: "ROUTE",
+                    routeId: "clxxxxxxxxxxxxxxxxxx",
+                    nickname: "My commute route",
+                  },
+                },
+                saveJourney: {
+                  summary: "Save a journey",
+                  value: {
+                    type: "JOURNEY",
+                    nickname: "Daily commute",
+                    itineraryData: {
+                      legs: [],
+                      totalDistanceMeters: 5000,
+                      totalDurationMinutes: 30,
+                    },
+                    originLat: 3.139,
+                    originLng: 101.6869,
+                    destinationLat: 3.1516,
+                    destinationLng: 101.6942,
+                    destinationName: "Office",
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
-          "201": { description: "Route saved.", content: { "application/json": { schema: { type: "object", required: ["savedRoute"], properties: { savedRoute: { $ref: "#/components/schemas/SavedRouteItem" } } } } } },
+          "201": {
+            description: "Item saved.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["item"],
+                  properties: { item: { $ref: "#/components/schemas/SavedItem" } },
+                },
+              },
+            },
+          },
           "400": { description: "Validation failed.", content: { "application/json": { schema: { $ref: validationErrorReference } } } },
           "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
-          "404": { description: "Route not found.", content: { "application/json": { schema: { $ref: errorReference } } } },
         },
       },
     },
-    "/api/user/{id}/saved-routes/{routeId}": {
-      delete: {
+    "/api/user/{id}/saved-items/{itemId}": {
+      get: {
         tags: ["Users"],
-        summary: "Remove a saved route",
-        description: "Deletes a saved route for the user.",
+        summary: "Get saved item",
+        description: "Returns a specific saved item.",
         security: [{ CookieAuth: [] }],
         parameters: [
-          { name: "id", in: "path", required: true, schema: { type: "string" } },
-          { name: "routeId", in: "path", required: true, schema: { type: "string" } },
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
+          { name: "itemId", in: "path", required: true, schema: { type: "string" }, description: "Saved item identifier." },
         ],
         responses: {
-          "200": { description: "Removed.", content: { "application/json": { schema: { $ref: "#/components/schemas/SuccessResponse" } } } },
+          "200": {
+            description: "Item returned.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["item"],
+                  properties: { item: { $ref: "#/components/schemas/SavedItem" } },
+                },
+              },
+            },
+          },
           "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+          "404": { description: "Item not found.", content: { "application/json": { schema: { $ref: errorReference } } } },
+        },
+      },
+      delete: {
+        tags: ["Users"],
+        summary: "Delete saved item",
+        description: "Deletes a saved item for the user.",
+        security: [{ CookieAuth: [] }],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "User identifier." },
+          { name: "itemId", in: "path", required: true, schema: { type: "string" }, description: "Saved item identifier." },
+        ],
+        responses: {
+          "200": { description: "Item deleted.", content: { "application/json": { schema: { $ref: "#/components/schemas/SuccessResponse" } } } },
+          "401": { description: "Unauthorized.", content: { "application/json": { schema: { $ref: errorReference } } } },
+          "404": { description: "Item not found.", content: { "application/json": { schema: { $ref: errorReference } } } },
+        },
+      },
+    },
+    "/api/journeys/{id}": {
+      get: {
+        tags: ["Journeys"],
+        summary: "Get journey details",
+        description: "Returns journey details. Authenticated users can access their own journeys with full details. Public access returns limited data for shared journeys only.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" }, description: "Journey/saved item identifier." },
+        ],
+        responses: {
+          "200": {
+            description: "Journey returned successfully.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/JourneyDetailResponse" },
+              },
+            },
+          },
+          "404": {
+            description: "Journey not found or not accessible.",
+            content: { "application/json": { schema: { $ref: errorReference } } },
+          },
+          "500": {
+            description: "Unexpected error.",
+            content: { "application/json": { schema: { $ref: errorReference } } },
+          },
+        },
+      },
+    },
+    "/api/bus/{id}": {
+      get: {
+        tags: ["Routing"],
+        summary: "Get bus details",
+        description: "Endpoint stub for per-bus service information.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Unique bus identifier.",
+          },
+        ],
+        responses: {
+          "501": {
+            description: "Not implemented.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/NotImplementedResponse" },
+              },
+            },
+          },
         },
       },
     },
@@ -977,30 +1039,81 @@ export const openApiDocument: OpenAPIV3.Document = {
           },
         },
       },
+      SaveItemRequest: {
+        oneOf: [
+          { $ref: "#/components/schemas/SaveJourneyRequest" },
+          { $ref: "#/components/schemas/SaveRouteRequest" },
+        ],
+        discriminator: {
+          propertyName: "type",
+          mapping: {
+            JOURNEY: "#/components/schemas/SaveJourneyRequest",
+            ROUTE: "#/components/schemas/SaveRouteRequest",
+          },
+        },
+      },
+      SaveJourneyRequest: {
+        type: "object",
+        required: ["type", "itineraryData", "originLat", "originLng", "destinationLat", "destinationLng"],
+        properties: {
+          type: { type: "string", enum: ["JOURNEY"] },
+          nickname: { type: "string", maxLength: 120 },
+          itineraryData: {
+            type: "object",
+            required: ["legs", "totalDistanceMeters", "totalDurationMinutes"],
+            properties: {
+              legs: { type: "array", items: { type: "object" } },
+              totalDistanceMeters: { type: "number" },
+              totalDurationMinutes: { type: "number" },
+              routeId: { type: "string" },
+              routeName: { type: "string" },
+              routeNumber: { type: "string" },
+              startStopId: { type: "string" },
+              endStopId: { type: "string" },
+            },
+          },
+          originLat: { type: "number" },
+          originLng: { type: "number" },
+          destinationLat: { type: "number" },
+          destinationLng: { type: "number" },
+          destinationName: { type: "string", maxLength: 200 },
+        },
+      },
       SaveRouteRequest: {
         type: "object",
-        required: ["routeId"],
+        required: ["type", "routeId"],
         properties: {
+          type: { type: "string", enum: ["ROUTE"] },
           routeId: { type: "string", description: "ID of the route to save." },
-          nickname: { type: "string", nullable: true, maxLength: 120 },
+          nickname: { type: "string", maxLength: 120 },
         },
       },
-      SavedRouteItem: {
+      SavedItem: {
         type: "object",
-        required: ["id", "routeId", "createdAt"],
+        required: ["id", "userId", "type", "createdAt"],
         properties: {
           id: { type: "string" },
-          routeId: { type: "string" },
+          userId: { type: "string" },
+          type: { type: "string", enum: ["ROUTE", "JOURNEY"] },
           nickname: { type: "string", nullable: true },
+          routeId: { type: "string", nullable: true },
+          itineraryData: { type: "object", nullable: true },
+          originLat: { type: "number", nullable: true },
+          originLng: { type: "number", nullable: true },
+          destinationLat: { type: "number", nullable: true },
+          destinationLng: { type: "number", nullable: true },
+          destinationName: { type: "string", nullable: true },
+          totalDistance: { type: "number", nullable: true },
+          totalDuration: { type: "number", nullable: true },
+          lastViewed: { type: "string", format: "date-time", nullable: true },
           createdAt: { type: "string", format: "date-time" },
-          route: { $ref: "#/components/schemas/Route" },
         },
       },
-      SavedRoutesResponse: {
+      SavedItemsResponse: {
         type: "object",
-        required: ["savedRoutes"],
+        required: ["items"],
         properties: {
-          savedRoutes: { type: "array", items: { $ref: "#/components/schemas/SavedRouteItem" } },
+          items: { type: "array", items: { $ref: "#/components/schemas/SavedItem" } },
         },
       },
       AuthSuccessResponse: {
@@ -1042,6 +1155,21 @@ export const openApiDocument: OpenAPIV3.Document = {
             maximum: 180,
             description: "Longitude expressed in decimal degrees.",
           },
+          stopName: {
+            type: "string",
+            description: "Optional name for the stop/location.",
+          },
+          bufferMinutes: {
+            type: "integer",
+            minimum: 0,
+            maximum: 1440,
+            description: "Optional buffer time to spend at this location (max 24 hours).",
+          },
+          purpose: {
+            type: "string",
+            maxLength: 200,
+            description: "Optional description of purpose at this stop.",
+          },
         },
       },
       DirectionsRequest: {
@@ -1075,7 +1203,7 @@ export const openApiDocument: OpenAPIV3.Document = {
             type: "string",
             format: "date-time",
             description:
-              "Optional ISO-8601 timestamp representing the desired departure time. Defaults to the current time if omitted.",
+              "Optional ISO-8601 timestamp representing the desired departure time. Must not be in the past or more than 7 days in the future. Defaults to the current time if omitted.",
           },
           maxWalkingDistanceMeters: {
             type: "number",
@@ -1137,6 +1265,10 @@ export const openApiDocument: OpenAPIV3.Document = {
             type: "string",
             description: "Public-facing route number (if applicable).",
           },
+          routeColor: {
+            type: "string",
+            description: "Route display color in hex format.",
+          },
           startStopId: {
             type: "string",
             description: "Identifier of the boarding stop for transit legs.",
@@ -1144,6 +1276,20 @@ export const openApiDocument: OpenAPIV3.Document = {
           endStopId: {
             type: "string",
             description: "Identifier of the getting off stop for transit legs.",
+          },
+          dataSource: {
+            type: "string",
+            enum: ["realtime", "scheduled", "estimated"],
+            description: "Source of departure time data.",
+          },
+          stops: {
+            type: "array",
+            items: { $ref: "#/components/schemas/PlanStop" },
+            description: "Multi-stop journey waypoints with arrival/departure times.",
+          },
+          totalBufferMinutes: {
+            type: "number",
+            description: "Total buffer time across all stops.",
           },
         },
       },
@@ -1182,6 +1328,10 @@ export const openApiDocument: OpenAPIV3.Document = {
             type: "string",
             description: "Transit route number for bus legs.",
           },
+          routeColor: {
+            type: "string",
+            description: "Transit route color for bus legs.",
+          },
           startStopId: {
             type: "string",
             description: "Stop identifier where the leg begins.",
@@ -1202,6 +1352,39 @@ export const openApiDocument: OpenAPIV3.Document = {
             type: "integer",
             description: "Number of stops traversed on a bus leg.",
           },
+          path: {
+            type: "array",
+            items: { $ref: "#/components/schemas/Coordinate" },
+            description: "Path coordinates for the leg.",
+          },
+          departureTime: {
+            type: "string",
+            format: "date-time",
+            description: "Departure time for this leg.",
+          },
+          waitTimeMinutes: {
+            type: "number",
+            description: "Wait time before this leg starts.",
+          },
+          dataSource: {
+            type: "string",
+            enum: ["realtime", "scheduled", "estimated"],
+            description: "Source of departure time data.",
+          },
+        },
+      },
+      PlanStop: {
+        type: "object",
+        required: ["name", "latitude", "longitude", "sequence", "bufferMinutes"],
+        properties: {
+          name: { type: "string" },
+          latitude: { type: "number" },
+          longitude: { type: "number" },
+          sequence: { type: "integer" },
+          bufferMinutes: { type: "number" },
+          purpose: { type: "string" },
+          arrivalTime: { type: "string", format: "date-time" },
+          departureTime: { type: "string", format: "date-time" },
         },
       },
       RoutesResponse: {
@@ -1296,6 +1479,145 @@ export const openApiDocument: OpenAPIV3.Document = {
             type: "integer",
             description:
               "Index of the stop within the route (starting from zero).",
+          },
+        },
+      },
+      ScheduleResponse: {
+        type: "object",
+        required: ["route", "date", "trips"],
+        properties: {
+          route: {
+            type: "object",
+            required: ["id", "name", "number"],
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              number: { type: "string" },
+            },
+          },
+          date: {
+            type: "string",
+            format: "date",
+            description: "The date for which the schedule is returned.",
+          },
+          activeServices: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Service IDs active on the given date.",
+          },
+          trips: {
+            type: "array",
+            items: { $ref: "#/components/schemas/ScheduleTrip" },
+          },
+        },
+      },
+      ScheduleTrip: {
+        type: "object",
+        required: ["id", "headsign", "directionId", "serviceId", "stopTimes"],
+        properties: {
+          id: { type: "string" },
+          headsign: { type: "string" },
+          directionId: { type: "integer" },
+          serviceId: { type: "integer" },
+          stopTimes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/StopTime" },
+          },
+        },
+      },
+      StopTime: {
+        type: "object",
+        required: ["arrivalTime", "departureTime", "stopSequence", "isTimepoint"],
+        properties: {
+          arrivalTime: { type: "string", description: "Arrival time in HH:MM:SS format." },
+          departureTime: { type: "string", description: "Departure time in HH:MM:SS format." },
+          stopSequence: { type: "integer" },
+          isTimepoint: { type: "boolean" },
+          stop: { $ref: "#/components/schemas/RouteStop" },
+        },
+      },
+      StopsListResponse: {
+        type: "object",
+        required: ["stops", "total", "limit", "offset"],
+        properties: {
+          stops: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RouteStop" },
+          },
+          total: {
+            type: "integer",
+            description: "Total number of stops matching the query.",
+          },
+          limit: {
+            type: "integer",
+            description: "Number of stops returned.",
+          },
+          offset: {
+            type: "integer",
+            description: "Number of stops skipped.",
+          },
+        },
+      },
+      StopDetailResponse: {
+        type: "object",
+        required: ["stop"],
+        properties: {
+          stop: {
+            allOf: [
+              { $ref: "#/components/schemas/RouteStop" },
+              {
+                type: "object",
+                properties: {
+                  stopNumericId: { type: "integer" },
+                  route: { $ref: "#/components/schemas/Route" },
+                  upcomingDepartures: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/UpcomingDeparture" },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      UpcomingDeparture: {
+        type: "object",
+        required: ["departureTime", "headsign", "directionId"],
+        properties: {
+          departureTime: { type: "string", description: "Departure time in HH:MM:SS format." },
+          arrivalTime: { type: "string" },
+          headsign: { type: "string" },
+          directionId: { type: "integer" },
+          route: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              number: { type: "string" },
+            },
+          },
+        },
+      },
+      JourneyDetailResponse: {
+        type: "object",
+        required: ["journey"],
+        properties: {
+          journey: {
+            type: "object",
+            required: ["id"],
+            properties: {
+              id: { type: "string" },
+              nickname: { type: "string", nullable: true },
+              itineraryData: { type: "object", nullable: true },
+              destinationName: { type: "string", nullable: true },
+              totalDistance: { type: "number", nullable: true },
+              totalDuration: { type: "number", nullable: true },
+              createdAt: { type: "string", format: "date-time" },
+              originLat: { type: "number" },
+              originLng: { type: "number" },
+              destinationLat: { type: "number" },
+              destinationLng: { type: "number" },
+            },
           },
         },
       },
