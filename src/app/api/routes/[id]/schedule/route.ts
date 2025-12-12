@@ -1,28 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/server/db";
 
-export async function GET(request: NextRequest) {
+type Context = { params: Promise<{ id: string }> };
+
+export async function GET(request: NextRequest, { params }: Context) {
   try {
+    const { id } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const routeId = searchParams.get("routeId");
     const directionId = searchParams.get("directionId");
     const dateParam = searchParams.get("date");
 
-    if (!routeId) {
-      return NextResponse.json(
-        { error: "routeId query parameter is required" },
-        { status: 400 }
-      );
-    }
-
     // Find route by cuid or numeric ID
     let route = await db.route.findUnique({
-      where: { id: routeId },
+      where: { id },
       select: { id: true, name: true, number: true, routeNumericId: true },
     });
 
     if (!route) {
-      const numericId = parseInt(routeId, 10);
+      const numericId = parseInt(id, 10);
       if (!isNaN(numericId)) {
         route = await db.route.findUnique({
           where: { routeNumericId: numericId },

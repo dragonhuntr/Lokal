@@ -155,13 +155,23 @@
   }
 }
 
-/* Hide Next.js error overlay in development
+/* Hide Next.js dev tools */
 nextjs-portal {
   display: none !important;
 }
 
-body {
-  padding: 0 !important;
-  overflow: auto !important;
+#__next-build-watcher {
+  display: none !important;
 }
- */
+
+#__next-dev-overlay {
+  display: none !important;
+}
+
+[data-nextjs-dialog-overlay] {
+  display: none !important;
+}
+
+[data-nextjs-toast] {
+  display: none !important;
+}
